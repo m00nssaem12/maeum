@@ -6,10 +6,11 @@
 <meta name="robots" content="noindex">
 <title>마음 이야기방</title>
 <!--
-  마음 이야기방 — AI와 감정 이해 대화 후 '마음 정리 노트'를 인쇄하는 웹앱
-  · 이름·로그인 없음 / 서버 저장 없음 / 브라우저 저장소(localStorage 등) 사용 없음
+  마음 이야기방 — AI와 감정 이해 대화 후 '마음 정리 노트'를 인쇄하거나 선생님 화면으로 보내는 웹앱
+  · 이름·로그인 없음 / 대화 저장 없음 / 브라우저 저장소(localStorage 등) 사용 없음
   · 외부 폰트·분석 도구 없음. 외부로 나가는 요청은 아래 WORKER_URL(중계 서버) 하나뿐
   · AI: Cloudflare Workers AI 무료 사용량 (하루 10,000 Neurons, 한국 시간 오전 9시 초기화)
+  · 선생님께 보내기: 선생님 화면이 열려 있을 때만, 선생님 화면만 열 수 있게 암호화해서 전달 (서버는 내용을 읽을 수 없고, 받는 즉시 지움)
   made by m00n
 -->
 <style>
@@ -25,6 +26,7 @@ button,input,textarea{font:inherit;color:inherit}
 .screen{display:none;min-height:100dvh}
 .screen.on{display:flex;flex-direction:column}
 .wrap{width:100%;max-width:720px;margin:0 auto;padding:28px 20px 40px}
+.wrap.wide{max-width:940px}
 .center{text-align:center}
 h1{font-size:34px;margin:6px 0 4px;letter-spacing:-.5px}
 h2{font-size:22px;margin:0 0 4px;letter-spacing:-.3px}
@@ -44,6 +46,7 @@ h2{font-size:22px;margin:0 0 4px;letter-spacing:-.3px}
 .btn.big{font-size:20px;padding:16px 34px;margin-top:10px}
 .btn.sm{font-size:15px;padding:8px 14px;border-radius:11px}
 .btn.full{width:100%;margin-top:12px}
+.linkbtn{background:none;border:0;color:var(--sub);text-decoration:underline;cursor:pointer;font-size:14px;margin-top:6px}
 
 .demo{background:#fff4c7;border:1px solid #f3dc7a;border-radius:12px;padding:10px 14px;font-size:14.5px;margin:0 auto 16px;max-width:520px;text-align:left}
 .promise{list-style:none;padding:18px 20px;margin:0 auto;max-width:520px;background:var(--card);border-radius:18px;border:1px solid var(--line);text-align:left}
@@ -70,7 +73,7 @@ h2{font-size:22px;margin:0 0 4px;letter-spacing:-.3px}
 .bar{position:sticky;top:0;z-index:5;display:flex;align-items:center;justify-content:space-between;gap:10px;padding:10px 16px;background:rgba(255,248,241,.95);backdrop-filter:blur(6px);border-bottom:1px solid var(--line)}
 .bar-title{font-weight:800;font-size:18px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .bar-title .mini{font-weight:500;font-size:14px;color:var(--sub);margin-left:6px}
-.bar-btns{display:flex;gap:8px;flex:none}
+.bar-btns{display:flex;gap:8px;flex:none;align-items:center}
 #s-chat{height:100dvh;min-height:0}
 .log{flex:1;overflow-y:auto;padding:18px 14px 8px;max-width:760px;width:100%;margin:0 auto}
 .msg{display:flex;margin:10px 0;gap:8px;align-items:flex-end}
@@ -103,6 +106,11 @@ h2{font-size:22px;margin:0 0 4px;letter-spacing:-.3px}
 .check{display:flex;gap:8px;align-items:center;margin:8px 2px 16px;color:var(--sub);cursor:pointer}
 .row{display:flex;gap:10px}
 .row .btn{flex:1}
+.sendbox{background:#f3fbf7;border:2px solid #cdeedd;border-radius:16px;padding:14px 16px;margin:0 0 16px}
+.sendhead{font-weight:800;margin-bottom:4px}
+.sendform{display:flex;gap:8px}
+.sendform input{flex:1;min-width:0;padding:10px 12px;border:2px solid #cdeedd;border-radius:12px;background:#fff}
+.btn.green{background:var(--ok)} .btn.green:hover{background:#34966f}
 
 /* 오버레이 */
 .overlay{position:fixed;inset:0;z-index:50;background:rgba(60,40,30,.45);display:grid;place-items:center;padding:16px}
@@ -116,13 +124,33 @@ h2{font-size:22px;margin:0 0 4px;letter-spacing:-.3px}
 .pinbox{margin-top:14px;padding-top:14px;border-top:1px dashed var(--line)}
 .pinbox input{padding:8px 12px;border-radius:10px;border:2px solid var(--line);width:120px;text-align:center;margin:0 6px}
 #teacherOpts .btn{display:block;width:100%;margin:8px 0 0}
-.linkbtn{background:none;border:0;color:var(--sub);text-decoration:underline;cursor:pointer;font-size:14px;margin-top:6px}
-.lbl{display:block;margin:10px 0;font-weight:600}
-.lbl input{display:block;width:100%;margin-top:4px;padding:10px 12px;border:2px solid var(--line);border-radius:10px}
-.linkbox{width:100%;padding:9px 10px;border:2px solid var(--line);border-radius:10px;font-size:14px;margin-bottom:6px;background:#fffaf6}
 .spinner{width:44px;height:44px;border-radius:50%;border:5px solid var(--soft);border-top-color:var(--main);animation:spin 1s linear infinite;margin:0 auto 12px}
 @keyframes spin{to{transform:rotate(360deg)}}
 .toast{position:fixed;left:50%;bottom:90px;transform:translateX(-50%);background:#3b3330;color:#fff;padding:10px 18px;border-radius:12px;z-index:60;font-size:15px;max-width:90vw;text-align:center}
+.lbl{display:block;margin:10px 0;font-weight:600;text-align:left}
+.lbl input{display:block;width:100%;margin-top:4px;padding:10px 12px;border:2px solid var(--line);border-radius:10px}
+.linkbox{width:100%;padding:9px 10px;border:2px solid var(--line);border-radius:10px;font-size:14px;margin-bottom:6px;background:#fffaf6}
+
+/* 선생님 화면 */
+.tinfo{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:14px 16px;margin-bottom:16px}
+.tinfo p{margin:0 0 8px}
+.tinfo .sub{margin:10px 0 0;font-size:14px}
+.tstatus{font-size:14px;padding:4px 10px;border-radius:999px;background:#eee;white-space:nowrap}
+.tstatus.on{background:#e3f6ee;color:#2a8a66}
+.tstatus.off{background:#fde8e5;color:#c4473a}
+.tempty{text-align:center;color:var(--sub);padding:40px 10px;border:2px dashed var(--line);border-radius:16px}
+.tcard{background:#fff;border:1px solid var(--line);border-radius:16px;padding:14px 16px;margin-bottom:12px;animation:pop .3s}
+.tcard.alert{background:#fff0ee;border:2px solid #f3b4aa}
+@keyframes pop{from{transform:translateY(-6px);opacity:0}to{transform:none;opacity:1}}
+.thead{display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap;margin-bottom:6px}
+.thead .who{font-weight:800;font-size:19px}
+.thead .meta{color:var(--sub);font-size:14.5px}
+.tf{margin:8px 0}
+.tf b{display:block;font-size:13.5px;color:var(--sub)}
+.tf div{white-space:pre-wrap}
+.tcard details{margin-top:8px;font-size:15px}
+.tcard summary{cursor:pointer;color:var(--sub)}
+.tcard .tbtns{display:flex;gap:8px;justify-content:flex-end;margin-top:10px}
 
 /* 인쇄 */
 #print{display:none}
@@ -161,14 +189,14 @@ h2{font-size:22px;margin:0 0 4px;letter-spacing:-.3px}
       <li><span>🙈</span>이름을 묻지 않아요.</li>
       <li><span>🫧</span>대화는 어디에도 저장되지 않아요. 창을 닫으면 사라져요.</li>
       <li><span>🔤</span>친구나 가족 이름은 'A', 'B'처럼 바꿔서 써 주세요.</li>
-      <li><span>📝</span>마지막 정리 노트는 내가 확인하고 고친 다음 선생님께 드려요.</li>
+      <li><span>📝</span>마지막 정리 노트는 내가 확인하고 고친 다음, 내가 고를 때만 선생님께 드려요.</li>
     </ul>
     <p class="note">마음이는 사람이 아닌 AI예요. 정말 힘든 일은 꼭 선생님이나 믿을 수 있는 어른께 이야기해요.</p>
     <div id="codeRow" class="coderow hidden"><label>입장 코드<input id="codeInput" type="text" autocomplete="off" spellcheck="false"></label></div>
     <p id="startErr" class="err"></p>
     <button class="btn big" id="btnStart">시작하기</button>
     <p id="classTag" class="note hidden">✓ 우리 반 링크로 들어왔어요</p>
-    <p><button class="linkbtn" id="btnTeacher">🔒 선생님: 우리 반 확인 번호 정하기</button></p>
+    <p><button class="linkbtn" id="btnTeacher">🧑‍🏫 선생님 화면 열기 / 우리 반 링크 만들기</button></p>
   </div>
 </section>
 
@@ -212,15 +240,47 @@ h2{font-size:22px;margin:0 0 4px;letter-spacing:-.3px}
 <section id="s-sum" class="screen">
   <header class="bar"><div class="bar-title">📝 마음 정리 노트</div></header>
   <div class="wrap">
-    <p class="sub">마음이가 오늘 이야기를 정리했어요. 내 마음과 다른 부분은 직접 고치고, 선생님께 보여 주기 싫은 칸은 지워도 괜찮아요. 빈 칸은 인쇄되지 않아요.</p>
+    <p class="sub">마음이가 오늘 이야기를 정리했어요. 내 마음과 다른 부분은 직접 고치고, 선생님께 보여 주기 싫은 칸은 지워도 괜찮아요. 빈 칸은 보내거나 인쇄하지 않아요.</p>
     <div class="sum-emo" id="sumEmo"></div>
     <div id="sumFields"></div>
-    <label class="check"><input type="checkbox" id="incLog"> 대화 내용 전체도 함께 인쇄하기</label>
+    <label class="check"><input type="checkbox" id="incLog"> 대화 내용 전체도 함께 보내기 / 인쇄하기</label>
+    <div id="sendBox" class="sendbox hidden">
+      <div class="sendhead">📨 선생님께 바로 보내기</div>
+      <p id="sendState" class="sub" style="margin:0 0 8px">선생님 화면을 확인하는 중…</p>
+      <div id="sendForm" class="sendform hidden">
+        <input id="sendWho" maxlength="20" placeholder="내 번호나 이름 (예: 7번)">
+        <button class="btn green" id="btnSendNote">보내기</button>
+      </div>
+      <button class="btn sm ghost hidden" id="btnRecheck">다시 확인하기</button>
+    </div>
     <div class="row">
       <button class="btn ghost" id="btnBack">← 대화로 돌아가기</button>
       <button class="btn" id="btnPrint">🖨️ 인쇄 / PDF 저장</button>
     </div>
     <button class="btn ghost full" id="btnDone">다 끝났어요 (모두 지우기)</button>
+  </div>
+</section>
+
+<!-- 5. 선생님 화면 -->
+<section id="s-teacher" class="screen">
+  <header class="bar">
+    <div class="bar-title">🧑‍🏫 선생님 화면</div>
+    <div class="bar-btns"><span id="tStatus" class="tstatus">연결 중…</span><button class="btn sm ghost" id="btnTClose">닫기</button></div>
+  </header>
+  <div class="wrap wide">
+    <div class="tinfo">
+      <p><b>우리 반 학생용 링크</b> — 이 링크로 들어온 학생만 이 화면으로 노트를 보낼 수 있어요.</p>
+      <input id="tLink" class="linkbox" readonly>
+      <button class="btn sm" id="btnTCopy">링크 복사</button>
+      <p class="sub">
+        · 이 화면이 열려 있을 때만 학생이 보낼 수 있어요.<br>
+        · 노트는 이 화면만 열 수 있게 암호화되어 전달되고, 이 화면이 받는 즉시 서버에서 지워져요.<br>
+        · 받은 노트는 이 화면에만 있어요. 창을 닫거나 새로고침하면 모두 사라지니, 필요한 노트는 인쇄해 두세요.<br>
+        · 학생 화면에 위기 안내가 뜨면 이름 없이 🚨 알림이 와요.
+      </p>
+    </div>
+    <div id="tEmpty" class="tempty">아직 받은 노트가 없어요.<br>학생이 '선생님께 바로 보내기'를 누르면 여기에 바로 나타나요.</div>
+    <div id="tList"></div>
   </div>
 </section>
 
@@ -234,12 +294,23 @@ h2{font-size:22px;margin:0 0 4px;letter-spacing:-.3px}
   <button class="btn" id="modalYes">네</button>
 </div></div>
 
+<!-- 선생님 화면 열기 -->
+<div id="tLogin" class="overlay hidden"><div class="card">
+  <h2>🧑‍🏫 선생님 화면</h2>
+  <p class="sub" id="tLoginSub">우리 반 확인 번호를 넣어 주세요. 처음이라면 새로 정하면 돼요. 같은 번호를 넣으면 언제나 같은 우리 반 링크가 만들어져요.</p>
+  <label class="lbl">확인 번호 (6자리 이상 추천)<input id="tPin" type="password" autocomplete="off"></label>
+  <p id="tLoginErr" class="err"></p>
+  <button class="btn ghost" id="tLoginCancel">취소</button>
+  <button class="btn" id="tLoginOk">열기</button>
+</div></div>
+
 <!-- 위기 안내 -->
 <div id="crisis" class="overlay hidden"><div class="card crisis-card">
   <div class="big-emoji">🫂</div>
   <h2>이야기해 줘서 정말 고마워.</h2>
   <p>지금 마음이 많이 힘들거나, 걱정되는 일이 있는 것 같아.<br>이건 마음이(AI)보다 <b>어른이 꼭 함께해야 하는 이야기</b>야.</p>
   <p class="strong">지금 바로 선생님께 이 화면을 보여 줘.</p>
+  <p id="crisisSent" class="sub hidden">선생님 화면에도 알림을 보냈어.</p>
   <div class="hotline">
     <div><b>📞 1388</b> 청소년 상담 (24시간)</div>
     <div><b>📞 109</b> 자살예방 상담 (24시간)</div>
@@ -247,7 +318,7 @@ h2{font-size:22px;margin:0 0 4px;letter-spacing:-.3px}
   </div>
   <p class="sub">너는 잘못한 게 없어. 말해 준 건 정말 용기 있는 일이야.</p>
   <div id="pinBox" class="pinbox">
-    <label>선생님 확인<input id="pinInput" type="password" inputmode="numeric" autocomplete="off"></label>
+    <label>선생님 확인<input id="pinInput" type="password" autocomplete="off"></label>
     <button class="btn sm" id="btnPin">확인</button>
     <p id="pinErr" class="err"></p>
   </div>
@@ -259,37 +330,16 @@ h2{font-size:22px;margin:0 0 4px;letter-spacing:-.3px}
   </div>
 </div></div>
 
-<!-- 선생님: 학급 확인 번호 설정 -->
-<div id="setup" class="overlay hidden"><div class="card" style="text-align:left">
-  <h2>우리 반 확인 번호 정하기</h2>
-  <p class="sub">위기 안내 화면을 닫을 때 쓰는 번호예요. 번호를 정하면 우리 반 전용 링크가 만들어져요. 번호는 어디에도 저장되지 않고, 링크에는 번호를 알아볼 수 없게 바꾼 값만 들어가요.</p>
-  <label class="lbl">확인 번호 (4자리 이상)<input id="setPin1" type="password" autocomplete="new-password"></label>
-  <label class="lbl">한 번 더 입력<input id="setPin2" type="password" autocomplete="new-password"></label>
-  <p id="setErr" class="err"></p>
-  <div id="setResult" class="hidden">
-    <p class="sub" style="margin-bottom:6px">이 링크를 학생들에게 나눠 주세요. (클래스룸, 패들렛, QR 코드 등)</p>
-    <input id="setLink" class="linkbox" readonly>
-    <button class="btn sm" id="btnCopy">링크 복사</button>
-    <button class="btn sm ghost" id="btnGo">이 기기에서 바로 열기</button>
-  </div>
-  <div style="text-align:right;margin-top:14px">
-    <button class="btn ghost" id="setClose">닫기</button>
-    <button class="btn" id="setMake">링크 만들기</button>
-  </div>
-</div></div>
-
 <div id="print"></div>
 
 <script>
 /* ===================== 선생님 설정 ===================== */
 const CONFIG = {
-  // Cloudflare Worker 주소 (예: "https://maeum.내계정.workers.dev")
-  // 비워 두면 '체험 모드'로 예시 반응만 나옵니다.
+  // Cloudflare Worker 주소. 비워 두면 '체험 모드'로 예시 반응만 나옵니다.
   WORKER_URL: "https://broad-feather-8bc8.m00nssaem11.workers.dev",
   // 중계 서버에 ACCESS_CODE를 설정했다면 true (학생이 시작할 때 입장 코드 입력)
   USE_ACCESS_CODE: false,
-  // 위기 안내 화면을 닫는 기본 확인 번호
-  // (학급 링크 없이 들어왔을 때만 사용. 각 학급은 시작 화면의 '우리 반 확인 번호 정하기'로 전용 링크를 만들어 쓰면 됩니다)
+  // 위기 안내 화면을 닫는 기본 확인 번호 (우리 반 링크 없이 들어왔을 때만 사용)
   TEACHER_PIN: "1234",
   // '정리하기' 버튼이 켜지는 최소 학생 발화 수
   MIN_TURNS_FOR_SUMMARY: 3,
@@ -305,20 +355,22 @@ const FIELDS = [
   ["tried","내가 해 볼 수 있는 것","나에게 도움이 되는 것"],
   ["to_teacher","선생님께 하고 싶은 말","선생님께 꼭 전하고 싶은 말"],
 ];
-// 위기 단어 (띄어쓰기 없이 비교) — 이 단어가 나오면 AI에 보내지 않고 바로 안내 화면
 const DANGER = ["죽고싶","죽고십","죽을래","죽어버릴","죽어버리고","죽고말","자살","자해","사라지고싶","없어지고싶","살기싫","살고싶지않","태어나지말걸","태어나지않았으면","뛰어내리","목매","손목긋","손목을긋","학대","성추행","성폭력"];
 
 const $ = id => document.getElementById(id);
 const esc = s => String(s).replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
 const isDanger = t => { const s = t.replace(/\s/g,""); return DANGER.some(k => s.includes(k)); };
 const emoIcon = n => (EMOS.find(e => e[1] === n) || ["",""])[0];
+const emoText = list => (list || []).map(e => emoIcon(e) + " " + e).join(", ");
+const hhmm = t => { const d = new Date(t); return String(d.getHours()).padStart(2,"0") + ":" + String(d.getMinutes()).padStart(2,"0"); };
+const baseUrl = () => location.href.split(/[?#]/)[0];
 
 let S, accessCode = "";
-const freshState = () => ({ emotions: [], temp: 5, messages: [], busy: false });
+const freshState = () => ({ emotions: [], temp: 5, messages: [], busy: false, cleared: false });
 S = freshState();
 
 function show(id){ document.querySelectorAll(".screen").forEach(s => s.classList.toggle("on", s.id === id)); window.scrollTo(0,0); }
-function toast(t){ const d = document.createElement("div"); d.className = "toast"; d.textContent = t; document.body.appendChild(d); setTimeout(() => d.remove(), 2600); }
+function toast(t){ const d = document.createElement("div"); d.className = "toast"; d.textContent = t; document.body.appendChild(d); setTimeout(() => d.remove(), 3000); }
 function loading(on, text){ $("loading").classList.toggle("hidden", !on); if (text) $("loadingText").textContent = text; }
 function ask(text){ return new Promise(res => {
   $("modalText").textContent = text; $("modal").classList.remove("hidden");
@@ -326,52 +378,46 @@ function ask(text){ return new Promise(res => {
   $("modalYes").onclick = () => done(true); $("modalNo").onclick = () => done(false);
 });}
 
-/* ---------- 학급 확인 번호 (링크의 ?k= 값) ---------- */
-function cyrb53(str, seed = 0){
-  let h1 = 0xdeadbeef ^ seed, h2 = 0x41c6ce57 ^ seed;
-  for (let i = 0, ch; i < str.length; i++) { ch = str.charCodeAt(i); h1 = Math.imul(h1 ^ ch, 2654435761); h2 = Math.imul(h2 ^ ch, 1597334677); }
-  h1 = Math.imul(h1 ^ (h1 >>> 16), 2246822507); h1 ^= Math.imul(h2 ^ (h2 >>> 13), 3266489909);
-  h2 = Math.imul(h2 ^ (h2 >>> 16), 2246822507); h2 ^= Math.imul(h1 ^ (h1 >>> 13), 3266489909);
-  return (4294967296 * (2097151 & h2) + (h1 >>> 0)).toString(36);
+/* ---------- 암호화 도구 ---------- */
+const TE = new TextEncoder(), TD = new TextDecoder();
+async function sha256hex(s){ const d = await crypto.subtle.digest("SHA-256", TE.encode(s)); return [...new Uint8Array(d)].map(b => b.toString(16).padStart(2,"0")).join(""); }
+const tokenFromPin = p => sha256hex("maeum-t|" + p);                                     // 선생님만 아는 값
+const keyFromToken = async t => (await sha256hex("maeum-k|" + t)).slice(0, 20);           // 학생 링크에 들어가는 값
+const classKeyFromPin = async p => keyFromToken(await tokenFromPin(p));
+function b64(buf){ const u = new Uint8Array(buf); let s = ""; for (let i = 0; i < u.length; i += 8192) s += String.fromCharCode.apply(null, u.subarray(i, i + 8192)); return btoa(s); }
+const unb64 = s => Uint8Array.from(atob(s), c => c.charCodeAt(0));
+const ECDH = { name: "ECDH", namedCurve: "P-256" };
+async function sealFor(pubJwkStr, obj){
+  const tpub = await crypto.subtle.importKey("jwk", JSON.parse(pubJwkStr), ECDH, false, []);
+  const eph = await crypto.subtle.generateKey(ECDH, false, ["deriveKey"]);
+  const aes = await crypto.subtle.deriveKey({ name: "ECDH", public: tpub }, eph.privateKey, { name: "AES-GCM", length: 256 }, false, ["encrypt"]);
+  const iv = crypto.getRandomValues(new Uint8Array(12));
+  const ct = await crypto.subtle.encrypt({ name: "AES-GCM", iv }, aes, TE.encode(JSON.stringify(obj)));
+  return JSON.stringify({ epk: await crypto.subtle.exportKey("jwk", eph.publicKey), iv: b64(iv), ct: b64(ct) });
 }
-const pinHash = p => cyrb53("maeum|" + p);
-const CLASS_KEY = new URLSearchParams(location.search).get("k");
-const checkPin = p => CLASS_KEY ? pinHash(p) === CLASS_KEY : p === CONFIG.TEACHER_PIN;
-if (CLASS_KEY) $("classTag").classList.remove("hidden");
+async function openBox(boxStr, privateKey){
+  const b = JSON.parse(boxStr);
+  const epk = await crypto.subtle.importKey("jwk", b.epk, ECDH, false, []);
+  const aes = await crypto.subtle.deriveKey({ name: "ECDH", public: epk }, privateKey, { name: "AES-GCM", length: 256 }, false, ["decrypt"]);
+  return JSON.parse(TD.decode(await crypto.subtle.decrypt({ name: "AES-GCM", iv: unb64(b.iv) }, aes, unb64(b.ct))));
+}
 
-$("btnTeacher").onclick = () => {
-  ["setPin1","setPin2","setLink"].forEach(id => $(id).value = "");
-  $("setErr").textContent = ""; $("setResult").classList.add("hidden");
-  $("setup").classList.remove("hidden"); $("setPin1").focus();
-};
-$("setClose").onclick = () => { $("setup").classList.add("hidden"); ["setPin1","setPin2"].forEach(id => $(id).value = ""); };
-$("setMake").onclick = () => {
-  const a = $("setPin1").value, b = $("setPin2").value;
-  if (a.length < 4) { $("setErr").textContent = "4자리 이상으로 정해 주세요."; return; }
-  if (a !== b) { $("setErr").textContent = "두 번 입력한 번호가 달라요."; return; }
-  $("setErr").textContent = "";
-  $("setLink").value = location.href.split(/[?#]/)[0] + "?k=" + pinHash(a);
-  $("setResult").classList.remove("hidden");
-};
-$("btnCopy").onclick = async () => {
-  const t = $("setLink");
-  try { await navigator.clipboard.writeText(t.value); }
-  catch { t.select(); document.execCommand("copy"); }
-  toast("링크를 복사했어요.");
-};
-$("btnGo").onclick = () => { location.href = $("setLink").value; };
+/* ---------- 우리 반 링크 (?k=) ---------- */
+const CLASS_KEY = new URLSearchParams(location.search).get("k");
+const RELAY_ON = !!(CONFIG.WORKER_URL && CLASS_KEY);
+async function checkPin(p){ return CLASS_KEY ? (await classKeyFromPin(p)) === CLASS_KEY : p === CONFIG.TEACHER_PIN; }
+if (CLASS_KEY) $("classTag").classList.remove("hidden");
 
 /* ---------- 시작 ---------- */
 if (!CONFIG.WORKER_URL) $("demoBanner").classList.remove("hidden");
 if (CONFIG.USE_ACCESS_CODE) $("codeRow").classList.remove("hidden");
-$("btnStart").onclick = () => {
-  $("startErr").textContent = "";
-  if (CONFIG.USE_ACCESS_CODE) {
-    accessCode = $("codeInput").value.trim();
-    if (!accessCode) { $("startErr").textContent = "선생님이 알려 준 입장 코드를 써 주세요."; return; }
-  }
-  renderEmo(); show("s-check");
-};
+function readAccessCode(){
+  if (!CONFIG.USE_ACCESS_CODE) return true;
+  accessCode = $("codeInput").value.trim();
+  if (!accessCode) { $("startErr").textContent = "선생님이 알려 준 입장 코드를 먼저 써 주세요."; return false; }
+  return true;
+}
+$("btnStart").onclick = () => { $("startErr").textContent = ""; if (!readAccessCode()) return; renderEmo(); show("s-check"); };
 
 /* ---------- 감정 체크인 ---------- */
 function renderEmo(){
@@ -432,7 +478,7 @@ async function requestReply(){
     typing(false);
     if (e.message === "code") { setBusy(false); backToStart("입장 코드가 맞지 않아요. 다시 확인해 주세요."); return; }
     if (e.message === "quota") { addBubble("assistant", "오늘 마음이가 쓸 수 있는 힘을 다 썼어. 😢\n내일 아침 9시가 지나면 다시 이야기할 수 있어. 급한 이야기는 지금 선생님께 직접 해 줘.", "errmsg"); setBusy(false); return; }
-    const d = addBubble("assistant", "앗, 연결이 잠깐 끊겼어.", "errmsg");
+    const d = addBubble("assistant", "앗, 연결이 잠깐 끊겼어." + (e.info ? "\n\n(선생님 확인용: " + e.info + ")" : ""), "errmsg");
     const btn = document.createElement("button"); btn.className = "btn sm"; btn.textContent = "다시 시도하기";
     btn.onclick = () => requestReply(); d.querySelector(".bubble").appendChild(btn);
   }
@@ -446,7 +492,7 @@ function send(textArg){
   const text = (textArg ?? $("inp").value).trim();
   if (!text) return;
   $("inp").value = ""; autoGrow();
-  if (lastRole() === "user") S.messages[S.messages.length-1].content += "\n" + text;   // 답을 못 받은 말에 이어 붙이기
+  if (lastRole() === "user") S.messages[S.messages.length-1].content += "\n" + text;
   else S.messages.push({ role: "user", content: text });
   addBubble("user", text);
   if (isDanger(text)) { handleSafety(); setBusy(false); return; }
@@ -455,7 +501,7 @@ function send(textArg){
 $("btnSend").onclick = () => send();
 $("inp").addEventListener("keydown", e => {
   if (e.key === "Enter" && !e.shiftKey) {
-    if (e.isComposing || e.keyCode === 229) return;   // 한글 조합 중
+    if (e.isComposing || e.keyCode === 229) return;
     e.preventDefault(); send();
   }
 });
@@ -471,15 +517,17 @@ function handleSafety(){
   }
   $("pinInput").value = ""; $("pinErr").textContent = "";
   $("pinBox").classList.remove("hidden"); $("teacherOpts").classList.add("hidden");
+  $("crisisSent").classList.add("hidden");
   $("crisis").classList.remove("hidden");
+  if (RELAY_ON) sendToTeacher({ type: "alert" }).then(ok => { if (ok) $("crisisSent").classList.remove("hidden"); }).catch(() => {});
 }
-$("btnPin").onclick = () => {
-  if (checkPin($("pinInput").value)) { $("pinBox").classList.add("hidden"); $("teacherOpts").classList.remove("hidden"); }
+$("btnPin").onclick = async () => {
+  if (await checkPin($("pinInput").value)) { S.cleared = true; $("pinBox").classList.add("hidden"); $("teacherOpts").classList.remove("hidden"); }
   else $("pinErr").textContent = "확인 번호가 달라요.";
 };
 $("pinInput").addEventListener("keydown", e => { if (e.key === "Enter") $("btnPin").click(); });
-$("btnCrisisPrint").onclick = () => { buildPrint({ title: "대화 기록", summary: false, log: true }); window.print(); };
-$("btnCrisisGo").onclick = () => { $("crisis").classList.add("hidden"); if (!$("s-sum").classList.contains("on")) $("inp").focus(); };
+$("btnCrisisPrint").onclick = () => { printDoc({ title: "대화 기록", emotions: S.emotions, temp: S.temp, log: S.messages }); };
+$("btnCrisisGo").onclick = () => { $("crisis").classList.add("hidden"); if ($("s-chat").classList.contains("on")) $("inp").focus(); };
 $("btnCrisisReset").onclick = () => { $("crisis").classList.add("hidden"); resetAll(); };
 
 /* ---------- 정리 노트 ---------- */
@@ -487,17 +535,17 @@ $("btnToSum").onclick = async () => {
   if (S.busy || !canSummarize()) return;
   setBusy(true); loading(true, "마음이가 오늘 이야기를 정리하고 있어요…");
   try {
-    const r = await callAPI({ mode: "summary", checkin: { emotions: S.emotions, temp: S.temp }, messages: S.messages });
+    const r = await callAPI({ mode: "summary", checkin: { emotions: S.emotions, temp: S.temp }, messages: S.messages, cleared: S.cleared });
     loading(false); setBusy(false);
     if (r.safety) { handleSafety(); return; }
     renderSummary(r.summary || {});
   } catch (e) {
     loading(false); setBusy(false);
-    toast(e.message === "quota" ? "오늘 사용량을 다 썼어요. 내일 아침 9시 이후에 정리할 수 있어요." : "정리하지 못했어요. 조금 뒤에 다시 눌러 볼래요?");
+    toast(e.message === "quota" ? "오늘 사용량을 다 썼어요. 내일 아침 9시 이후에 정리할 수 있어요." : "정리하지 못했어요. 조금 뒤에 다시 눌러 볼래요?" + (e.info ? " (" + e.info + ")" : ""));
   }
 };
 function renderSummary(sum){
-  $("sumEmo").innerHTML = `<b>고른 감정</b> ${S.emotions.map(e => emoIcon(e) + " " + esc(e)).join(", ")} &nbsp;·&nbsp; <b>마음의 크기</b> 🌡️ ${S.temp}/10`;
+  $("sumEmo").innerHTML = `<b>고른 감정</b> ${esc(emoText(S.emotions))} &nbsp;·&nbsp; <b>마음의 크기</b> 🌡️ ${S.temp}/10`;
   const box = $("sumFields"); box.innerHTML = "";
   FIELDS.forEach(([k, label, ph]) => {
     const f = document.createElement("div"); f.className = "field";
@@ -509,52 +557,194 @@ function renderSummary(sum){
   });
   $("incLog").checked = false;
   show("s-sum");
+  if (RELAY_ON) { $("sendBox").classList.remove("hidden"); checkTeacherOnline(); }
 }
+function readFields(){ const o = {}; FIELDS.forEach(([k]) => { const el = $("f_" + k); const v = el ? el.value.trim() : ""; if (v) o[k] = v; }); return o; }
 $("btnBack").onclick = () => { show("s-chat"); scrollLog(); };
-$("btnPrint").onclick = () => { buildPrint({ title: "마음 정리 노트", summary: true, log: $("incLog").checked }); window.print(); };
+$("btnPrint").onclick = () => { printDoc({ title: "마음 정리 노트", emotions: S.emotions, temp: S.temp, fields: readFields(), log: $("incLog").checked ? S.messages : null, memo: true }); };
 $("btnDone").onclick = async () => { if (await ask("오늘 이야기를 모두 지울까요? 지우면 다시 볼 수 없어요.")) resetAll(); };
 $("btnReset1").onclick = async () => { if (await ask("처음으로 돌아갈까요? 지금까지의 대화는 지워져요.")) resetAll(); };
 
-function buildPrint({ title, summary, log }){
+/* ---------- 선생님께 바로 보내기 (학생 쪽) ---------- */
+async function sendToTeacher(obj){
+  const r = await callAPI({ action: "student_key", k: CLASS_KEY });
+  if (!r.online) return false;
+  const box = await sealFor(r.pub, obj);
+  const s = await callAPI({ action: "student_send", k: CLASS_KEY, box });
+  return !!s.ok;
+}
+async function checkTeacherOnline(){
+  $("sendState").textContent = "선생님 화면을 확인하는 중…";
+  $("sendForm").classList.add("hidden"); $("btnRecheck").classList.add("hidden");
+  try {
+    const r = await callAPI({ action: "student_key", k: CLASS_KEY });
+    if (r.online) {
+      $("sendState").textContent = "선생님 화면이 열려 있어요. 위에서 고친 내용 그대로 선생님 화면에만 보내져요. (빈 칸은 보내지 않아요)";
+      $("sendForm").classList.remove("hidden");
+    } else {
+      $("sendState").textContent = "지금은 선생님 화면이 닫혀 있어요. 인쇄해서 드리거나, 선생님께 화면을 열어 달라고 말한 뒤 다시 확인해 줘.";
+      $("btnRecheck").classList.remove("hidden");
+    }
+  } catch (e) {
+    $("sendState").textContent = "선생님 화면을 확인하지 못했어요." + (e.info ? " (" + e.info + ")" : "");
+    $("btnRecheck").classList.remove("hidden");
+  }
+}
+$("btnRecheck").onclick = checkTeacherOnline;
+$("btnSendNote").onclick = async () => {
+  const who = $("sendWho").value.trim();
+  if (!who) { toast("번호나 이름을 써 줘야 선생님이 누구 노트인지 알 수 있어요."); $("sendWho").focus(); return; }
+  const fields = readFields();
+  if (!Object.keys(fields).length) { toast("보낼 내용이 없어요. 칸을 하나 이상 채워 줘."); return; }
+  if (!(await ask("정리 노트를 선생님께 보낼까요?"))) return;
+  $("btnSendNote").disabled = true;
+  try {
+    const ok = await sendToTeacher({ type: "note", who, emotions: S.emotions, temp: S.temp, fields, log: $("incLog").checked ? S.messages : null });
+    if (ok) { $("sendState").textContent = `✓ ${hhmm(Date.now())}에 선생님께 보냈어요! 고친 뒤 다시 보낼 수도 있어요.`; toast("선생님께 보냈어요."); }
+    else { $("sendState").textContent = "그 사이 선생님 화면이 닫혔어요. 인쇄해서 드리거나 다시 확인해 줘."; $("sendForm").classList.add("hidden"); $("btnRecheck").classList.remove("hidden"); }
+  } catch (e) { toast("보내지 못했어요. 다시 눌러 볼래요?" + (e.info ? " (" + e.info + ")" : "")); }
+  $("btnSendNote").disabled = false;
+};
+
+/* ---------- 인쇄 ---------- */
+function printDoc({ title, emotions, temp, fields, log, who, memo }){
   const d = new Date(), date = `${d.getFullYear()}. ${d.getMonth()+1}. ${d.getDate()}.`;
-  let h = `<div class="p-head"><h1>${title}</h1><div class="p-meta"><span>날짜: ${date}</span><span>이름: ________________</span></div></div>`;
-  h += `<div class="p-emo"><b>고른 감정</b> ${S.emotions.map(e => emoIcon(e) + " " + esc(e)).join(", ") || "-"} <b style="margin-left:14px">마음의 크기</b> ${S.temp}/10 <span class="p-bar"><i style="width:${S.temp*10}%"></i></span></div>`;
-  if (summary) FIELDS.forEach(([k, label]) => {
-    const el = $("f_" + k); const v = el ? el.value.trim() : "";
-    if (v) h += `<div class="p-field"><h3>${label}</h3><p>${esc(v)}</p></div>`;
-  });
-  if (log) h += `<div class="p-log"><h3>대화 내용</h3>` + S.messages.map(m => `<p><b>${m.role === "user" ? "나" : "마음이"}:</b> ${esc(m.content)}</p>`).join("") + `</div>`;
+  let h = `<div class="p-head"><h1>${title}</h1><div class="p-meta"><span>날짜: ${date}</span><span>이름: ${who ? esc(who) : "________________"}</span></div></div>`;
+  h += `<div class="p-emo"><b>고른 감정</b> ${esc(emoText(emotions)) || "-"} <b style="margin-left:14px">마음의 크기</b> ${temp}/10 <span class="p-bar"><i style="width:${temp*10}%"></i></span></div>`;
+  if (fields) FIELDS.forEach(([k, label]) => { const v = (fields[k] || "").trim(); if (v) h += `<div class="p-field"><h3>${label}</h3><p>${esc(v)}</p></div>`; });
+  if (log && log.length) h += `<div class="p-log"><h3>대화 내용</h3>` + log.map(m => `<p><b>${m.role === "user" ? "나" : "마음이"}:</b> ${esc(m.content)}</p>`).join("") + `</div>`;
   h += `<div class="p-memo"><h3>선생님 메모</h3><div class="lines"></div></div>`;
   h += `<div class="p-foot">학생이 AI 도우미 '마음이'와 대화한 뒤 확인한 내용입니다. AI의 정리는 참고 자료이며 진단이 아닙니다. · made by m00n</div>`;
   $("print").innerHTML = h;
+  window.print();
 }
 window.addEventListener("afterprint", () => { $("print").innerHTML = ""; });
 
 function resetAll(){
   S = freshState();
   $("log").innerHTML = ""; $("sumFields").innerHTML = ""; $("print").innerHTML = "";
-  $("inp").value = ""; autoGrow();
+  $("inp").value = ""; autoGrow(); $("sendWho").value = "";
+  $("sendBox").classList.add("hidden");
   $("temp").value = 5; $("tempVal").textContent = 5;
   $("btnToSum").disabled = true;
   show("s-start");
 }
 function backToStart(msg){ resetAll(); $("startErr").textContent = msg; }
 
+/* ---------- 선생님 화면 ---------- */
+const T = { t: null, k: null, keys: null, timer: null, busy: false, count: 0 };
+$("btnTeacher").onclick = () => {
+  $("startErr").textContent = "";
+  if (!readAccessCode()) return;
+  $("tPin").value = ""; $("tLoginErr").textContent = "";
+  $("tLogin").classList.remove("hidden"); $("tPin").focus();
+};
+$("tLoginCancel").onclick = () => { $("tLogin").classList.add("hidden"); $("tPin").value = ""; };
+$("tPin").addEventListener("keydown", e => { if (e.key === "Enter") $("tLoginOk").click(); });
+$("tLoginOk").onclick = async () => {
+  const pin = $("tPin").value;
+  if (pin.length < 4) { $("tLoginErr").textContent = "4자리 이상으로 정해 주세요. (6자리 이상 추천)"; return; }
+  if (!window.crypto || !crypto.subtle) { $("tLoginErr").textContent = "이 브라우저에서는 쓸 수 없어요. https 주소로 열어 주세요."; return; }
+  const k = await classKeyFromPin(pin);
+  if (CLASS_KEY && k !== CLASS_KEY) { $("tLoginErr").textContent = "지금 링크를 만든 번호와 달라요. 새 반을 만들려면 ?k= 없는 기본 주소에서 열어 주세요."; return; }
+  $("tPin").value = ""; $("tLogin").classList.add("hidden");
+  T.t = await tokenFromPin(pin); T.k = k;
+  $("tLink").value = baseUrl() + "?k=" + k;
+  $("tList").innerHTML = ""; $("tEmpty").classList.remove("hidden"); T.count = 0;
+  show("s-teacher");
+  if (!CONFIG.WORKER_URL) { setTStatus("체험 모드 — 받기 꺼짐", "off"); return; }
+  T.keys = await crypto.subtle.generateKey(ECDH, false, ["deriveKey"]);   // 이 화면에서만 쓰는 열쇠 (창을 닫으면 사라짐)
+  await tOpen();
+  clearInterval(T.timer); T.timer = setInterval(tPoll, 4000);
+};
+function setTStatus(text, cls){ const s = $("tStatus"); s.textContent = text; s.className = "tstatus " + (cls || ""); }
+async function tOpen(){
+  try {
+    const pub = JSON.stringify(await crypto.subtle.exportKey("jwk", T.keys.publicKey));
+    await callAPI({ action: "teacher_open", t: T.t, pub });
+    setTStatus("● 받는 중", "on");
+  } catch (e) { setTStatus("연결 안 됨" + (e.info ? " — " + e.info : ""), "off"); }
+}
+async function tPoll(){
+  if (T.busy || !T.t) return; T.busy = true;
+  try {
+    const r = await callAPI({ action: "teacher_poll", t: T.t });
+    if (r.error === "closed") await tOpen();
+    else {
+      for (const it of r.items || []) { try { addNote(await openBox(it.box, T.keys.privateKey), it.at); } catch {} }
+      setTStatus("● 받는 중", "on");
+    }
+  } catch (e) { setTStatus("연결이 끊겼어요 — 다시 시도 중", "off"); }
+  T.busy = false;
+}
+function beep(){
+  try { const a = new (window.AudioContext || window.webkitAudioContext)(); const o = a.createOscillator(), g = a.createGain();
+    o.frequency.value = 880; g.gain.setValueAtTime(.15, a.currentTime); g.gain.exponentialRampToValueAtTime(.001, a.currentTime + .5);
+    o.connect(g); g.connect(a.destination); o.start(); o.stop(a.currentTime + .5); } catch {}
+}
+function addNote(n, at){
+  $("tEmpty").classList.add("hidden");
+  const c = document.createElement("div");
+  if (n.type === "alert") {
+    c.className = "tcard alert";
+    c.innerHTML = `<div class="thead"><span class="who">🚨 위기 안내 알림</span><span class="meta">${hhmm(at)}</span></div>
+      <div>한 학생의 화면에 위기 안내가 떴어요. 교실을 둘러보고, 안내 화면이 떠 있는 학생과 바로 이야기해 주세요.<br><span class="sub">(누구인지는 알림에 담기지 않아요. 학생 화면은 선생님 확인 번호를 넣어야 닫혀요.)</span></div>
+      <div class="tbtns"><button class="btn sm ghost">확인했어요</button></div>`;
+    c.querySelector("button").onclick = () => removeNote(c);
+    beep(); setTimeout(beep, 600);
+  } else {
+    c.className = "tcard";
+    const fields = n.fields || {};
+    let h = `<div class="thead"><span class="who">${esc(n.who || "이름 없음")}</span><span class="meta">${hhmm(at)} · ${esc(emoText(n.emotions))} · 🌡️ ${n.temp}/10</span></div>`;
+    FIELDS.forEach(([k, label]) => { if (fields[k]) h += `<div class="tf"><b>${label}</b><div>${esc(fields[k])}</div></div>`; });
+    if (n.log && n.log.length) h += `<details><summary>대화 전체 보기 (${n.log.length}개)</summary>` + n.log.map(m => `<div class="tf"><b>${m.role === "user" ? "학생" : "마음이"}</b><div>${esc(m.content)}</div></div>`).join("") + `</details>`;
+    h += `<div class="tbtns"><button class="btn sm ghost" data-a="del">지우기</button><button class="btn sm" data-a="print">🖨️ 인쇄</button></div>`;
+    c.innerHTML = h;
+    c.querySelector('[data-a="print"]').onclick = () => printDoc({ title: "마음 정리 노트", emotions: n.emotions, temp: n.temp, fields, log: n.log, who: n.who, memo: true });
+    c.querySelector('[data-a="del"]').onclick = async () => { if (await ask("이 노트를 지울까요? 지우면 다시 볼 수 없어요.")) removeNote(c); };
+    beep();
+  }
+  $("tList").prepend(c); T.count++;
+}
+function removeNote(c){ c.remove(); T.count--; if (!$("tList").children.length) $("tEmpty").classList.remove("hidden"); }
+$("btnTCopy").onclick = async () => {
+  const t = $("tLink");
+  try { await navigator.clipboard.writeText(t.value); } catch { t.select(); document.execCommand("copy"); }
+  toast("링크를 복사했어요.");
+};
+$("btnTClose").onclick = async () => {
+  if (T.count > 0 && !(await ask("선생님 화면을 닫을까요? 받은 노트가 모두 사라져요."))) return;
+  clearInterval(T.timer); T.timer = null;
+  if (CONFIG.WORKER_URL && T.t) callAPI({ action: "teacher_close", t: T.t }).catch(() => {});
+  T.t = T.k = T.keys = null; T.count = 0; $("tList").innerHTML = "";
+  show("s-start");
+};
+window.addEventListener("beforeunload", e => { if (T.count > 0) { e.preventDefault(); e.returnValue = ""; } });
+
 /* ---------- 서버 통신 ---------- */
 async function callAPI(payload){
   if (!CONFIG.WORKER_URL) return demoAPI(payload);
   const headers = { "Content-Type": "application/json" };
   if (accessCode) headers["X-Access-Code"] = accessCode;
-  const res = await fetch(CONFIG.WORKER_URL, { method: "POST", headers, body: JSON.stringify(payload), cache: "no-store", credentials: "omit" });
+  let res;
+  try { res = await fetch(CONFIG.WORKER_URL, { method: "POST", headers, body: JSON.stringify(payload), cache: "no-store", credentials: "omit" }); }
+  catch { throw Object.assign(new Error("net"), { info: "서버에 닿지 못함 (주소 또는 인터넷 연결 확인)" }); }
   if (res.status === 401) throw new Error("code");
   if (res.status === 429) throw new Error("quota");
-  if (!res.ok) throw new Error("net");
+  if (!res.ok) {
+    let b = {}; try { b = await res.json(); } catch {}
+    const info = b.error === "origin" ? `허용되지 않은 주소에서 접속함 — 접속 주소: ${b.got || "(없음)"} / 허용: ${(b.allowed || []).join(", ")}`
+               : b.error === "nodb" ? "중계 서버에 D1 데이터베이스(DB)가 연결되지 않았어요"
+               : `${res.status} ${b.error || ""} ${b.detail || ""}`.trim();
+    throw Object.assign(new Error("net"), { info });
+  }
   return res.json();
 }
 
 /* ---------- 체험 모드 (AI 미연결) ---------- */
 function demoAPI(p){
   return new Promise(res => setTimeout(() => {
+    if (p.action) { res({ online: false }); return; }
     const users = p.messages.filter(m => m.role === "user");
     if (p.mode === "summary") {
       res({ summary: { feelings: `${p.checkin.emotions.join(", ")} 마음이었어요.`, event: users.map(u => u.content).join(" "), thoughts: "", wish: "", tried: "", to_teacher: "" } });
