@@ -1,0 +1,577 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="robots" content="noindex">
+<title>마음 이야기방</title>
+<!--
+  마음 이야기방 — AI와 감정 이해 대화 후 '마음 정리 노트'를 인쇄하는 웹앱
+  · 이름·로그인 없음 / 서버 저장 없음 / 브라우저 저장소(localStorage 등) 사용 없음
+  · 외부 폰트·분석 도구 없음. 외부로 나가는 요청은 아래 WORKER_URL(중계 서버) 하나뿐
+  · AI: Cloudflare Workers AI 무료 사용량 (하루 10,000 Neurons, 한국 시간 오전 9시 초기화)
+  made by m00n
+-->
+<style>
+:root{
+  --bg:#fff8f1; --card:#ffffff; --ink:#3b3330; --sub:#8b7f78; --line:#f1e3d8;
+  --main:#ff8a5c; --main-d:#ef6a38; --soft:#ffeadf; --me:#ffdccb; --ok:#3fae86; --warn:#e25b4b;
+}
+*{box-sizing:border-box}
+html,body{margin:0;height:100%}
+body{font-family:"Apple SD Gothic Neo","Malgun Gothic","Noto Sans KR",system-ui,sans-serif;background:var(--bg);color:var(--ink);font-size:17px;line-height:1.6;-webkit-font-smoothing:antialiased}
+button,input,textarea{font:inherit;color:inherit}
+.hidden{display:none!important}
+.screen{display:none;min-height:100dvh}
+.screen.on{display:flex;flex-direction:column}
+.wrap{width:100%;max-width:720px;margin:0 auto;padding:28px 20px 40px}
+.center{text-align:center}
+h1{font-size:34px;margin:6px 0 4px;letter-spacing:-.5px}
+h2{font-size:22px;margin:0 0 4px;letter-spacing:-.3px}
+.mt{margin-top:30px}
+.lead{font-size:19px;margin:0 0 20px}
+.sub{color:var(--sub);margin:0 0 14px;font-size:15.5px}
+.note{color:var(--sub);font-size:14.5px;margin:14px 0}
+.err{color:var(--warn);font-size:15px;min-height:1.2em;margin:8px 0}
+.logo{font-size:64px;line-height:1;margin-top:20px}
+
+.btn{border:0;border-radius:14px;background:var(--main);color:#fff;font-weight:700;padding:12px 20px;cursor:pointer;transition:transform .08s,background .15s}
+.btn:hover{background:var(--main-d)}
+.btn:active{transform:scale(.97)}
+.btn:disabled{background:#e6d6cc;color:#fff;cursor:default;transform:none}
+.btn.ghost{background:transparent;color:var(--main-d);border:2px solid var(--soft)}
+.btn.ghost:hover{background:var(--soft)}
+.btn.big{font-size:20px;padding:16px 34px;margin-top:10px}
+.btn.sm{font-size:15px;padding:8px 14px;border-radius:11px}
+.btn.full{width:100%;margin-top:12px}
+
+.demo{background:#fff4c7;border:1px solid #f3dc7a;border-radius:12px;padding:10px 14px;font-size:14.5px;margin:0 auto 16px;max-width:520px;text-align:left}
+.promise{list-style:none;padding:18px 20px;margin:0 auto;max-width:520px;background:var(--card);border-radius:18px;border:1px solid var(--line);text-align:left}
+.promise li{display:flex;gap:10px;padding:6px 0}
+.promise li span{flex:none;width:28px;text-align:center}
+.coderow{margin:12px 0 0}
+.coderow input{margin-left:8px;padding:8px 12px;border-radius:10px;border:2px solid var(--line);width:160px;text-align:center}
+
+/* 감정 카드 */
+.emo-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-top:10px}
+@media (max-width:520px){.emo-grid{grid-template-columns:repeat(3,1fr)}}
+.emo{background:var(--card);border:2px solid var(--line);border-radius:16px;padding:12px 6px;cursor:pointer;text-align:center;transition:all .12s;user-select:none}
+.emo .i{font-size:34px;line-height:1.2;display:block}
+.emo .t{font-size:15px;font-weight:600}
+.emo:hover{border-color:#ffc9b2}
+.emo.sel{border-color:var(--main);background:var(--soft);transform:translateY(-2px);box-shadow:0 4px 12px rgba(255,138,92,.2)}
+.thermo{display:flex;align-items:center;gap:12px;margin-top:12px;color:var(--sub);font-size:15px}
+.thermo input{flex:1;accent-color:var(--main);height:30px}
+.temp-val{text-align:center;font-size:18px;margin:4px 0 24px}
+.temp-val b{font-size:30px;color:var(--main-d)}
+#s-check .btn.big{display:block;margin:10px auto 0}
+
+/* 대화 */
+.bar{position:sticky;top:0;z-index:5;display:flex;align-items:center;justify-content:space-between;gap:10px;padding:10px 16px;background:rgba(255,248,241,.95);backdrop-filter:blur(6px);border-bottom:1px solid var(--line)}
+.bar-title{font-weight:800;font-size:18px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.bar-title .mini{font-weight:500;font-size:14px;color:var(--sub);margin-left:6px}
+.bar-btns{display:flex;gap:8px;flex:none}
+#s-chat{height:100dvh;min-height:0}
+.log{flex:1;overflow-y:auto;padding:18px 14px 8px;max-width:760px;width:100%;margin:0 auto}
+.msg{display:flex;margin:10px 0;gap:8px;align-items:flex-end}
+.msg.ai::before{content:"🧡";flex:none;width:34px;height:34px;border-radius:50%;background:var(--soft);display:grid;place-items:center;font-size:17px}
+.msg.me{justify-content:flex-end}
+.bubble{max-width:78%;padding:11px 15px;border-radius:18px;white-space:pre-wrap;word-break:keep-all;overflow-wrap:anywhere}
+.ai .bubble{background:var(--card);border:1px solid var(--line);border-bottom-left-radius:6px}
+.me .bubble{background:var(--me);border-bottom-right-radius:6px}
+.msg.errmsg .bubble{background:#fff0ee;border-color:#f6c9c2}
+.msg.errmsg .btn{margin-top:8px;display:block}
+.dots{display:inline-flex;gap:5px;padding:4px 2px}
+.dots i{width:8px;height:8px;border-radius:50%;background:#e8b9a3;animation:b 1.2s infinite}
+.dots i:nth-child(2){animation-delay:.15s}.dots i:nth-child(3){animation-delay:.3s}
+@keyframes b{0%,60%,100%{transform:translateY(0);opacity:.5}30%{transform:translateY(-5px);opacity:1}}
+.chips{display:flex;gap:8px;flex-wrap:wrap;padding:4px 14px 6px;max-width:760px;width:100%;margin:0 auto}
+.chip{border:1px solid var(--line);background:var(--card);border-radius:999px;padding:6px 13px;font-size:14.5px;cursor:pointer;color:var(--sub)}
+.chip:hover{border-color:var(--main);color:var(--main-d)}
+.inputrow{display:flex;gap:8px;padding:8px 14px calc(14px + env(safe-area-inset-bottom));max-width:760px;width:100%;margin:0 auto}
+.inputrow textarea{flex:1;resize:none;border:2px solid var(--line);border-radius:16px;padding:11px 14px;background:var(--card);max-height:140px;outline:none}
+.inputrow textarea:focus{border-color:#ffc3a8}
+.hint{font-size:13px;color:var(--sub);text-align:center;padding:0 0 4px}
+
+/* 정리 노트 */
+.sum-emo{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:12px 16px;margin-bottom:14px;font-size:16px}
+.field{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:12px 16px;margin-bottom:12px}
+.field label{display:block;font-weight:700;margin-bottom:6px}
+.field textarea{width:100%;border:0;border-radius:10px;background:#fffaf6;padding:10px 12px;resize:none;outline:none;min-height:52px}
+.field textarea:focus{background:#fff3ec}
+.field textarea::placeholder{color:#c6b8ae}
+.check{display:flex;gap:8px;align-items:center;margin:8px 2px 16px;color:var(--sub);cursor:pointer}
+.row{display:flex;gap:10px}
+.row .btn{flex:1}
+
+/* 오버레이 */
+.overlay{position:fixed;inset:0;z-index:50;background:rgba(60,40,30,.45);display:grid;place-items:center;padding:16px}
+.card{word-break:keep-all;background:var(--card);border-radius:22px;padding:26px 22px;max-width:520px;width:100%;text-align:center;box-shadow:0 20px 50px rgba(0,0,0,.2)}
+.card .btn{margin:6px 4px 0}
+#crisis{background:rgba(255,236,226,.97)}
+.crisis-card{max-height:calc(100dvh - 32px);overflow-y:auto}
+.big-emoji{font-size:56px;line-height:1.1}
+.strong{font-weight:800;font-size:19px;color:var(--main-d)}
+.hotline{background:var(--soft);border-radius:14px;padding:12px;margin:12px 0;text-align:left;display:grid;gap:4px;font-size:16px}
+.pinbox{margin-top:14px;padding-top:14px;border-top:1px dashed var(--line)}
+.pinbox input{padding:8px 12px;border-radius:10px;border:2px solid var(--line);width:120px;text-align:center;margin:0 6px}
+#teacherOpts .btn{display:block;width:100%;margin:8px 0 0}
+.linkbtn{background:none;border:0;color:var(--sub);text-decoration:underline;cursor:pointer;font-size:14px;margin-top:6px}
+.lbl{display:block;margin:10px 0;font-weight:600}
+.lbl input{display:block;width:100%;margin-top:4px;padding:10px 12px;border:2px solid var(--line);border-radius:10px}
+.linkbox{width:100%;padding:9px 10px;border:2px solid var(--line);border-radius:10px;font-size:14px;margin-bottom:6px;background:#fffaf6}
+.spinner{width:44px;height:44px;border-radius:50%;border:5px solid var(--soft);border-top-color:var(--main);animation:spin 1s linear infinite;margin:0 auto 12px}
+@keyframes spin{to{transform:rotate(360deg)}}
+.toast{position:fixed;left:50%;bottom:90px;transform:translateX(-50%);background:#3b3330;color:#fff;padding:10px 18px;border-radius:12px;z-index:60;font-size:15px;max-width:90vw;text-align:center}
+
+/* 인쇄 */
+#print{display:none}
+@page{size:A4;margin:16mm 15mm}
+@media print{
+  body{background:#fff;font-size:12pt}
+  .screen,.overlay,.toast{display:none!important}
+  #print{display:block;color:#222}
+  .p-head{display:flex;justify-content:space-between;align-items:flex-end;border-bottom:2.5px solid #333;padding-bottom:6px;margin-bottom:12px}
+  .p-head h1{font-size:21pt;margin:0}
+  .p-meta{display:flex;gap:22px;font-size:11.5pt}
+  .p-emo{border:1px solid #bbb;border-radius:8px;padding:8px 12px;margin-bottom:12px;font-size:11.5pt;display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+  .p-bar{display:inline-block;width:120px;height:10px;border:1px solid #888;border-radius:5px;overflow:hidden;vertical-align:middle}
+  .p-bar i{display:block;height:100%;background:#888}
+  .p-field{margin-bottom:10px;break-inside:avoid}
+  .p-field h3,.p-memo h3,.p-log h3{font-size:12pt;margin:0 0 3px;padding-left:7px;border-left:4px solid #888}
+  .p-field p{margin:0;padding:6px 10px;border:1px solid #ddd;border-radius:6px;white-space:pre-wrap;font-size:11.5pt}
+  .p-log{margin-top:12px}
+  .p-log p{margin:2px 0;white-space:pre-wrap;font-size:10.5pt}
+  .p-memo{margin-top:14px;break-inside:avoid}
+  .p-memo .lines{height:42mm;border:1px solid #bbb;border-radius:6px;background:repeating-linear-gradient(#fff 0,#fff 9.5mm,#ccc 9.5mm,#ccc 10mm)}
+  .p-foot{margin-top:12px;font-size:9pt;color:#777;text-align:right}
+}
+</style>
+</head>
+<body>
+
+<!-- 1. 시작 -->
+<section id="s-start" class="screen on">
+  <div class="wrap center">
+    <div class="logo">💬</div>
+    <h1>마음 이야기방</h1>
+    <p class="lead">오늘 내 마음을 AI 친구 <b>마음이</b>와 함께 천천히 정리해 봐요.</p>
+    <div id="demoBanner" class="demo hidden">⚙️ <b>체험 모드</b>예요. AI가 연결되지 않아 예시 반응만 나와요.<br>(선생님: 파일 위쪽 CONFIG의 WORKER_URL에 중계 서버 주소를 넣어 주세요.)</div>
+    <ul class="promise">
+      <li><span>🙈</span>이름을 묻지 않아요.</li>
+      <li><span>🫧</span>대화는 어디에도 저장되지 않아요. 창을 닫으면 사라져요.</li>
+      <li><span>🔤</span>친구나 가족 이름은 'A', 'B'처럼 바꿔서 써 주세요.</li>
+      <li><span>📝</span>마지막 정리 노트는 내가 확인하고 고친 다음 선생님께 드려요.</li>
+    </ul>
+    <p class="note">마음이는 사람이 아닌 AI예요. 정말 힘든 일은 꼭 선생님이나 믿을 수 있는 어른께 이야기해요.</p>
+    <div id="codeRow" class="coderow hidden"><label>입장 코드<input id="codeInput" type="text" autocomplete="off" spellcheck="false"></label></div>
+    <p id="startErr" class="err"></p>
+    <button class="btn big" id="btnStart">시작하기</button>
+    <p id="classTag" class="note hidden">✓ 우리 반 링크로 들어왔어요</p>
+    <p><button class="linkbtn" id="btnTeacher">🔒 선생님: 우리 반 확인 번호 정하기</button></p>
+  </div>
+</section>
+
+<!-- 2. 감정 체크인 -->
+<section id="s-check" class="screen">
+  <div class="wrap">
+    <h2>지금 내 마음과 가장 가까운 감정은?</h2>
+    <p class="sub">최대 3개까지 고를 수 있어요.</p>
+    <div id="emoGrid" class="emo-grid"></div>
+    <h2 class="mt">그 마음은 얼마나 커?</h2>
+    <div class="thermo"><span>조금</span><input type="range" id="temp" min="1" max="10" value="5"><span>아주 많이</span></div>
+    <div class="temp-val">🌡️ <b id="tempVal">5</b> / 10</div>
+    <button class="btn big" id="btnBegin" disabled>마음이랑 이야기 시작하기</button>
+  </div>
+</section>
+
+<!-- 3. 대화 -->
+<section id="s-chat" class="screen">
+  <header class="bar">
+    <div class="bar-title">🧡 마음이<span id="chatEmo" class="mini"></span></div>
+    <div class="bar-btns">
+      <button class="btn sm" id="btnToSum" disabled>📝 정리하기</button>
+      <button class="btn sm ghost" id="btnReset1">처음으로</button>
+    </div>
+  </header>
+  <div id="log" class="log" aria-live="polite"></div>
+  <div class="chips" id="chips">
+    <button class="chip">잘 모르겠어</button>
+    <button class="chip">말하기 좀 어려워</button>
+    <button class="chip">조금 더 생각해 볼게</button>
+    <button class="chip">응, 맞아</button>
+  </div>
+  <div class="inputrow">
+    <textarea id="inp" rows="1" maxlength="500" placeholder="여기에 써 봐요"></textarea>
+    <button class="btn" id="btnSend">보내기</button>
+  </div>
+  <div class="hint">Enter 보내기 · Shift+Enter 줄바꿈</div>
+</section>
+
+<!-- 4. 정리 노트 -->
+<section id="s-sum" class="screen">
+  <header class="bar"><div class="bar-title">📝 마음 정리 노트</div></header>
+  <div class="wrap">
+    <p class="sub">마음이가 오늘 이야기를 정리했어요. 내 마음과 다른 부분은 직접 고치고, 선생님께 보여 주기 싫은 칸은 지워도 괜찮아요. 빈 칸은 인쇄되지 않아요.</p>
+    <div class="sum-emo" id="sumEmo"></div>
+    <div id="sumFields"></div>
+    <label class="check"><input type="checkbox" id="incLog"> 대화 내용 전체도 함께 인쇄하기</label>
+    <div class="row">
+      <button class="btn ghost" id="btnBack">← 대화로 돌아가기</button>
+      <button class="btn" id="btnPrint">🖨️ 인쇄 / PDF 저장</button>
+    </div>
+    <button class="btn ghost full" id="btnDone">다 끝났어요 (모두 지우기)</button>
+  </div>
+</section>
+
+<!-- 로딩 -->
+<div id="loading" class="overlay hidden"><div class="card"><div class="spinner"></div><div id="loadingText">잠깐만 기다려 줘…</div></div></div>
+
+<!-- 확인 창 -->
+<div id="modal" class="overlay hidden"><div class="card">
+  <p id="modalText" style="font-size:18px;margin:0 0 14px"></p>
+  <button class="btn ghost" id="modalNo">아니요</button>
+  <button class="btn" id="modalYes">네</button>
+</div></div>
+
+<!-- 위기 안내 -->
+<div id="crisis" class="overlay hidden"><div class="card crisis-card">
+  <div class="big-emoji">🫂</div>
+  <h2>이야기해 줘서 정말 고마워.</h2>
+  <p>지금 마음이 많이 힘들거나, 걱정되는 일이 있는 것 같아.<br>이건 마음이(AI)보다 <b>어른이 꼭 함께해야 하는 이야기</b>야.</p>
+  <p class="strong">지금 바로 선생님께 이 화면을 보여 줘.</p>
+  <div class="hotline">
+    <div><b>📞 1388</b> 청소년 상담 (24시간)</div>
+    <div><b>📞 109</b> 자살예방 상담 (24시간)</div>
+    <div><b>🚨 112 · 119</b> 지금 위험할 때</div>
+  </div>
+  <p class="sub">너는 잘못한 게 없어. 말해 준 건 정말 용기 있는 일이야.</p>
+  <div id="pinBox" class="pinbox">
+    <label>선생님 확인<input id="pinInput" type="password" inputmode="numeric" autocomplete="off"></label>
+    <button class="btn sm" id="btnPin">확인</button>
+    <p id="pinErr" class="err"></p>
+  </div>
+  <div id="teacherOpts" class="hidden">
+    <p class="sub" style="margin-top:12px">선생님 확인 완료</p>
+    <button class="btn" id="btnCrisisPrint">대화 내용 인쇄</button>
+    <button class="btn ghost" id="btnCrisisGo">대화 이어가기</button>
+    <button class="btn ghost" id="btnCrisisReset">처음으로 (모두 지우기)</button>
+  </div>
+</div></div>
+
+<!-- 선생님: 학급 확인 번호 설정 -->
+<div id="setup" class="overlay hidden"><div class="card" style="text-align:left">
+  <h2>우리 반 확인 번호 정하기</h2>
+  <p class="sub">위기 안내 화면을 닫을 때 쓰는 번호예요. 번호를 정하면 우리 반 전용 링크가 만들어져요. 번호는 어디에도 저장되지 않고, 링크에는 번호를 알아볼 수 없게 바꾼 값만 들어가요.</p>
+  <label class="lbl">확인 번호 (4자리 이상)<input id="setPin1" type="password" autocomplete="new-password"></label>
+  <label class="lbl">한 번 더 입력<input id="setPin2" type="password" autocomplete="new-password"></label>
+  <p id="setErr" class="err"></p>
+  <div id="setResult" class="hidden">
+    <p class="sub" style="margin-bottom:6px">이 링크를 학생들에게 나눠 주세요. (클래스룸, 패들렛, QR 코드 등)</p>
+    <input id="setLink" class="linkbox" readonly>
+    <button class="btn sm" id="btnCopy">링크 복사</button>
+    <button class="btn sm ghost" id="btnGo">이 기기에서 바로 열기</button>
+  </div>
+  <div style="text-align:right;margin-top:14px">
+    <button class="btn ghost" id="setClose">닫기</button>
+    <button class="btn" id="setMake">링크 만들기</button>
+  </div>
+</div></div>
+
+<div id="print"></div>
+
+<script>
+/* ===================== 선생님 설정 ===================== */
+const CONFIG = {
+  // Cloudflare Worker 주소 (예: "https://maeum.내계정.workers.dev")
+  // 비워 두면 '체험 모드'로 예시 반응만 나옵니다.
+  WORKER_URL: "https://broad-feather-8bc8.m00nssaem11.workers.dev",
+  // 중계 서버에 ACCESS_CODE를 설정했다면 true (학생이 시작할 때 입장 코드 입력)
+  USE_ACCESS_CODE: false,
+  // 위기 안내 화면을 닫는 기본 확인 번호
+  // (학급 링크 없이 들어왔을 때만 사용. 각 학급은 시작 화면의 '우리 반 확인 번호 정하기'로 전용 링크를 만들어 쓰면 됩니다)
+  TEACHER_PIN: "1234",
+  // '정리하기' 버튼이 켜지는 최소 학생 발화 수
+  MIN_TURNS_FOR_SUMMARY: 3,
+};
+/* ====================================================== */
+
+const EMOS = [["😊","기뻐요"],["🤩","신나요"],["😌","편안해요"],["🥰","고마워요"],["😢","슬퍼요"],["😞","속상해요"],["😠","화나요"],["😤","억울해요"],["😟","불안해요"],["😨","무서워요"],["🥺","외로워요"],["😳","부끄러워요"],["😒","짜증나요"],["😔","실망했어요"],["😩","지쳤어요"],["🤔","잘 모르겠어요"]];
+const FIELDS = [
+  ["feelings","오늘 내 마음","어떤 감정이었고, 왜 그랬는지"],
+  ["event","있었던 일","무슨 일이 있었는지"],
+  ["thoughts","그때 든 생각과 몸의 느낌","그때 머릿속 생각, 몸의 느낌"],
+  ["wish","내가 바라는 것","어떻게 되면 좋겠는지"],
+  ["tried","내가 해 볼 수 있는 것","나에게 도움이 되는 것"],
+  ["to_teacher","선생님께 하고 싶은 말","선생님께 꼭 전하고 싶은 말"],
+];
+// 위기 단어 (띄어쓰기 없이 비교) — 이 단어가 나오면 AI에 보내지 않고 바로 안내 화면
+const DANGER = ["죽고싶","죽고십","죽을래","죽어버릴","죽어버리고","죽고말","자살","자해","사라지고싶","없어지고싶","살기싫","살고싶지않","태어나지말걸","태어나지않았으면","뛰어내리","목매","손목긋","손목을긋","학대","성추행","성폭력"];
+
+const $ = id => document.getElementById(id);
+const esc = s => String(s).replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+const isDanger = t => { const s = t.replace(/\s/g,""); return DANGER.some(k => s.includes(k)); };
+const emoIcon = n => (EMOS.find(e => e[1] === n) || ["",""])[0];
+
+let S, accessCode = "";
+const freshState = () => ({ emotions: [], temp: 5, messages: [], busy: false });
+S = freshState();
+
+function show(id){ document.querySelectorAll(".screen").forEach(s => s.classList.toggle("on", s.id === id)); window.scrollTo(0,0); }
+function toast(t){ const d = document.createElement("div"); d.className = "toast"; d.textContent = t; document.body.appendChild(d); setTimeout(() => d.remove(), 2600); }
+function loading(on, text){ $("loading").classList.toggle("hidden", !on); if (text) $("loadingText").textContent = text; }
+function ask(text){ return new Promise(res => {
+  $("modalText").textContent = text; $("modal").classList.remove("hidden");
+  const done = v => { $("modal").classList.add("hidden"); $("modalYes").onclick = $("modalNo").onclick = null; res(v); };
+  $("modalYes").onclick = () => done(true); $("modalNo").onclick = () => done(false);
+});}
+
+/* ---------- 학급 확인 번호 (링크의 ?k= 값) ---------- */
+function cyrb53(str, seed = 0){
+  let h1 = 0xdeadbeef ^ seed, h2 = 0x41c6ce57 ^ seed;
+  for (let i = 0, ch; i < str.length; i++) { ch = str.charCodeAt(i); h1 = Math.imul(h1 ^ ch, 2654435761); h2 = Math.imul(h2 ^ ch, 1597334677); }
+  h1 = Math.imul(h1 ^ (h1 >>> 16), 2246822507); h1 ^= Math.imul(h2 ^ (h2 >>> 13), 3266489909);
+  h2 = Math.imul(h2 ^ (h2 >>> 16), 2246822507); h2 ^= Math.imul(h1 ^ (h1 >>> 13), 3266489909);
+  return (4294967296 * (2097151 & h2) + (h1 >>> 0)).toString(36);
+}
+const pinHash = p => cyrb53("maeum|" + p);
+const CLASS_KEY = new URLSearchParams(location.search).get("k");
+const checkPin = p => CLASS_KEY ? pinHash(p) === CLASS_KEY : p === CONFIG.TEACHER_PIN;
+if (CLASS_KEY) $("classTag").classList.remove("hidden");
+
+$("btnTeacher").onclick = () => {
+  ["setPin1","setPin2","setLink"].forEach(id => $(id).value = "");
+  $("setErr").textContent = ""; $("setResult").classList.add("hidden");
+  $("setup").classList.remove("hidden"); $("setPin1").focus();
+};
+$("setClose").onclick = () => { $("setup").classList.add("hidden"); ["setPin1","setPin2"].forEach(id => $(id).value = ""); };
+$("setMake").onclick = () => {
+  const a = $("setPin1").value, b = $("setPin2").value;
+  if (a.length < 4) { $("setErr").textContent = "4자리 이상으로 정해 주세요."; return; }
+  if (a !== b) { $("setErr").textContent = "두 번 입력한 번호가 달라요."; return; }
+  $("setErr").textContent = "";
+  $("setLink").value = location.href.split(/[?#]/)[0] + "?k=" + pinHash(a);
+  $("setResult").classList.remove("hidden");
+};
+$("btnCopy").onclick = async () => {
+  const t = $("setLink");
+  try { await navigator.clipboard.writeText(t.value); }
+  catch { t.select(); document.execCommand("copy"); }
+  toast("링크를 복사했어요.");
+};
+$("btnGo").onclick = () => { location.href = $("setLink").value; };
+
+/* ---------- 시작 ---------- */
+if (!CONFIG.WORKER_URL) $("demoBanner").classList.remove("hidden");
+if (CONFIG.USE_ACCESS_CODE) $("codeRow").classList.remove("hidden");
+$("btnStart").onclick = () => {
+  $("startErr").textContent = "";
+  if (CONFIG.USE_ACCESS_CODE) {
+    accessCode = $("codeInput").value.trim();
+    if (!accessCode) { $("startErr").textContent = "선생님이 알려 준 입장 코드를 써 주세요."; return; }
+  }
+  renderEmo(); show("s-check");
+};
+
+/* ---------- 감정 체크인 ---------- */
+function renderEmo(){
+  const g = $("emoGrid"); g.innerHTML = "";
+  EMOS.forEach(([i,t]) => {
+    const b = document.createElement("button");
+    b.className = "emo" + (S.emotions.includes(t) ? " sel" : "");
+    b.innerHTML = `<span class="i">${i}</span><span class="t">${t}</span>`;
+    b.onclick = () => {
+      const k = S.emotions.indexOf(t);
+      if (k >= 0) S.emotions.splice(k,1);
+      else { if (S.emotions.length >= 3) { toast("감정은 3개까지 고를 수 있어요."); return; } S.emotions.push(t); }
+      renderEmo();
+    };
+    g.appendChild(b);
+  });
+  $("btnBegin").disabled = S.emotions.length === 0;
+}
+$("temp").oninput = e => { S.temp = +e.target.value; $("tempVal").textContent = S.temp; };
+$("btnBegin").onclick = () => {
+  $("chatEmo").textContent = S.emotions.map(emoIcon).join("") + " 🌡️" + S.temp;
+  $("log").innerHTML = "";
+  show("s-chat");
+  requestReply();
+};
+
+/* ---------- 대화 ---------- */
+function scrollLog(){ const l = $("log"); l.scrollTop = l.scrollHeight; }
+function addBubble(role, text, cls){
+  const d = document.createElement("div");
+  d.className = "msg " + (role === "user" ? "me" : "ai") + (cls ? " " + cls : "");
+  const b = document.createElement("div"); b.className = "bubble"; b.textContent = text;
+  d.appendChild(b); $("log").appendChild(d); scrollLog(); return d;
+}
+let typingEl = null;
+function typing(on){
+  if (on && !typingEl) { typingEl = addBubble("assistant",""); typingEl.querySelector(".bubble").innerHTML = '<span class="dots"><i></i><i></i><i></i></span>'; }
+  if (!on && typingEl) { typingEl.remove(); typingEl = null; }
+}
+function setBusy(b){ S.busy = b; $("btnSend").disabled = b; $("btnToSum").disabled = b || !canSummarize(); }
+const userTurns = () => S.messages.filter(m => m.role === "user").length;
+const canSummarize = () => userTurns() >= CONFIG.MIN_TURNS_FOR_SUMMARY;
+const lastRole = () => S.messages.length ? S.messages[S.messages.length-1].role : null;
+
+async function requestReply(){
+  if (S.busy) return;
+  document.querySelectorAll(".errmsg").forEach(e => e.remove());
+  setBusy(true); typing(true);
+  try {
+    const r = await callAPI({ mode: "chat", checkin: { emotions: S.emotions, temp: S.temp }, messages: S.messages });
+    typing(false);
+    if (r.safety) handleSafety();
+    else {
+      const t = (r.reply || "").trim() || "이야기해 줘서 고마워. 조금 더 말해 줄래?";
+      S.messages.push({ role: "assistant", content: t }); addBubble("assistant", t);
+    }
+  } catch (e) {
+    typing(false);
+    if (e.message === "code") { setBusy(false); backToStart("입장 코드가 맞지 않아요. 다시 확인해 주세요."); return; }
+    if (e.message === "quota") { addBubble("assistant", "오늘 마음이가 쓸 수 있는 힘을 다 썼어. 😢\n내일 아침 9시가 지나면 다시 이야기할 수 있어. 급한 이야기는 지금 선생님께 직접 해 줘.", "errmsg"); setBusy(false); return; }
+    const d = addBubble("assistant", "앗, 연결이 잠깐 끊겼어.", "errmsg");
+    const btn = document.createElement("button"); btn.className = "btn sm"; btn.textContent = "다시 시도하기";
+    btn.onclick = () => requestReply(); d.querySelector(".bubble").appendChild(btn);
+  }
+  setBusy(false);
+  if (!$("crisis").classList.contains("hidden")) return;
+  $("inp").focus();
+}
+
+function send(textArg){
+  if (S.busy) return;
+  const text = (textArg ?? $("inp").value).trim();
+  if (!text) return;
+  $("inp").value = ""; autoGrow();
+  if (lastRole() === "user") S.messages[S.messages.length-1].content += "\n" + text;   // 답을 못 받은 말에 이어 붙이기
+  else S.messages.push({ role: "user", content: text });
+  addBubble("user", text);
+  if (isDanger(text)) { handleSafety(); setBusy(false); return; }
+  requestReply();
+}
+$("btnSend").onclick = () => send();
+$("inp").addEventListener("keydown", e => {
+  if (e.key === "Enter" && !e.shiftKey) {
+    if (e.isComposing || e.keyCode === 229) return;   // 한글 조합 중
+    e.preventDefault(); send();
+  }
+});
+function autoGrow(){ const t = $("inp"); t.style.height = "auto"; t.style.height = Math.min(t.scrollHeight, 140) + "px"; }
+$("inp").addEventListener("input", autoGrow);
+document.querySelectorAll(".chip").forEach(c => c.onclick = () => send(c.textContent));
+
+/* ---------- 위기 안내 ---------- */
+function handleSafety(){
+  if (lastRole() === "user") {
+    const t = "이야기해 줘서 정말 고마워. 이건 꼭 선생님과 함께 이야기하자.";
+    S.messages.push({ role: "assistant", content: t }); addBubble("assistant", t);
+  }
+  $("pinInput").value = ""; $("pinErr").textContent = "";
+  $("pinBox").classList.remove("hidden"); $("teacherOpts").classList.add("hidden");
+  $("crisis").classList.remove("hidden");
+}
+$("btnPin").onclick = () => {
+  if (checkPin($("pinInput").value)) { $("pinBox").classList.add("hidden"); $("teacherOpts").classList.remove("hidden"); }
+  else $("pinErr").textContent = "확인 번호가 달라요.";
+};
+$("pinInput").addEventListener("keydown", e => { if (e.key === "Enter") $("btnPin").click(); });
+$("btnCrisisPrint").onclick = () => { buildPrint({ title: "대화 기록", summary: false, log: true }); window.print(); };
+$("btnCrisisGo").onclick = () => { $("crisis").classList.add("hidden"); if (!$("s-sum").classList.contains("on")) $("inp").focus(); };
+$("btnCrisisReset").onclick = () => { $("crisis").classList.add("hidden"); resetAll(); };
+
+/* ---------- 정리 노트 ---------- */
+$("btnToSum").onclick = async () => {
+  if (S.busy || !canSummarize()) return;
+  setBusy(true); loading(true, "마음이가 오늘 이야기를 정리하고 있어요…");
+  try {
+    const r = await callAPI({ mode: "summary", checkin: { emotions: S.emotions, temp: S.temp }, messages: S.messages });
+    loading(false); setBusy(false);
+    if (r.safety) { handleSafety(); return; }
+    renderSummary(r.summary || {});
+  } catch (e) {
+    loading(false); setBusy(false);
+    toast(e.message === "quota" ? "오늘 사용량을 다 썼어요. 내일 아침 9시 이후에 정리할 수 있어요." : "정리하지 못했어요. 조금 뒤에 다시 눌러 볼래요?");
+  }
+};
+function renderSummary(sum){
+  $("sumEmo").innerHTML = `<b>고른 감정</b> ${S.emotions.map(e => emoIcon(e) + " " + esc(e)).join(", ")} &nbsp;·&nbsp; <b>마음의 크기</b> 🌡️ ${S.temp}/10`;
+  const box = $("sumFields"); box.innerHTML = "";
+  FIELDS.forEach(([k, label, ph]) => {
+    const f = document.createElement("div"); f.className = "field";
+    f.innerHTML = `<label for="f_${k}">${label}</label><textarea id="f_${k}" placeholder="${ph} (비워 둬도 괜찮아요)"></textarea>`;
+    box.appendChild(f);
+    const ta = f.querySelector("textarea"); ta.value = (sum[k] || "").trim();
+    const grow = () => { ta.style.height = "auto"; ta.style.height = ta.scrollHeight + "px"; };
+    ta.addEventListener("input", grow); requestAnimationFrame(grow);
+  });
+  $("incLog").checked = false;
+  show("s-sum");
+}
+$("btnBack").onclick = () => { show("s-chat"); scrollLog(); };
+$("btnPrint").onclick = () => { buildPrint({ title: "마음 정리 노트", summary: true, log: $("incLog").checked }); window.print(); };
+$("btnDone").onclick = async () => { if (await ask("오늘 이야기를 모두 지울까요? 지우면 다시 볼 수 없어요.")) resetAll(); };
+$("btnReset1").onclick = async () => { if (await ask("처음으로 돌아갈까요? 지금까지의 대화는 지워져요.")) resetAll(); };
+
+function buildPrint({ title, summary, log }){
+  const d = new Date(), date = `${d.getFullYear()}. ${d.getMonth()+1}. ${d.getDate()}.`;
+  let h = `<div class="p-head"><h1>${title}</h1><div class="p-meta"><span>날짜: ${date}</span><span>이름: ________________</span></div></div>`;
+  h += `<div class="p-emo"><b>고른 감정</b> ${S.emotions.map(e => emoIcon(e) + " " + esc(e)).join(", ") || "-"} <b style="margin-left:14px">마음의 크기</b> ${S.temp}/10 <span class="p-bar"><i style="width:${S.temp*10}%"></i></span></div>`;
+  if (summary) FIELDS.forEach(([k, label]) => {
+    const el = $("f_" + k); const v = el ? el.value.trim() : "";
+    if (v) h += `<div class="p-field"><h3>${label}</h3><p>${esc(v)}</p></div>`;
+  });
+  if (log) h += `<div class="p-log"><h3>대화 내용</h3>` + S.messages.map(m => `<p><b>${m.role === "user" ? "나" : "마음이"}:</b> ${esc(m.content)}</p>`).join("") + `</div>`;
+  h += `<div class="p-memo"><h3>선생님 메모</h3><div class="lines"></div></div>`;
+  h += `<div class="p-foot">학생이 AI 도우미 '마음이'와 대화한 뒤 확인한 내용입니다. AI의 정리는 참고 자료이며 진단이 아닙니다. · made by m00n</div>`;
+  $("print").innerHTML = h;
+}
+window.addEventListener("afterprint", () => { $("print").innerHTML = ""; });
+
+function resetAll(){
+  S = freshState();
+  $("log").innerHTML = ""; $("sumFields").innerHTML = ""; $("print").innerHTML = "";
+  $("inp").value = ""; autoGrow();
+  $("temp").value = 5; $("tempVal").textContent = 5;
+  $("btnToSum").disabled = true;
+  show("s-start");
+}
+function backToStart(msg){ resetAll(); $("startErr").textContent = msg; }
+
+/* ---------- 서버 통신 ---------- */
+async function callAPI(payload){
+  if (!CONFIG.WORKER_URL) return demoAPI(payload);
+  const headers = { "Content-Type": "application/json" };
+  if (accessCode) headers["X-Access-Code"] = accessCode;
+  const res = await fetch(CONFIG.WORKER_URL, { method: "POST", headers, body: JSON.stringify(payload), cache: "no-store", credentials: "omit" });
+  if (res.status === 401) throw new Error("code");
+  if (res.status === 429) throw new Error("quota");
+  if (!res.ok) throw new Error("net");
+  return res.json();
+}
+
+/* ---------- 체험 모드 (AI 미연결) ---------- */
+function demoAPI(p){
+  return new Promise(res => setTimeout(() => {
+    const users = p.messages.filter(m => m.role === "user");
+    if (p.mode === "summary") {
+      res({ summary: { feelings: `${p.checkin.emotions.join(", ")} 마음이었어요.`, event: users.map(u => u.content).join(" "), thoughts: "", wish: "", tried: "", to_teacher: "" } });
+      return;
+    }
+    if (!users.length) { res({ reply: `안녕, 나는 마음이야 🧡\n오늘 '${p.checkin.emotions.join("', '")}' 마음을 골랐구나. 무슨 일이 있었는지 이야기해 줄래?` }); return; }
+    const last = users[users.length-1].content, short = last.length > 24 ? last.slice(0,24) + "…" : last;
+    const R = [
+      `"${short}" 그런 일이 있었구나. 그때 어떤 생각이 들었어?`,
+      "이야기해 줘서 고마워. 그때 몸이나 마음은 어떤 느낌이었어?",
+      "그런 마음이 드는 게 자연스러워. 너는 앞으로 어떻게 되면 좋겠어?",
+      "좋아. 선생님께 꼭 하고 싶은 말이 있다면 뭐야?",
+      "오늘 이야기 정말 잘해 줬어. 이제 위의 '정리하기' 버튼을 눌러 정리해 볼까?",
+    ];
+    res({ reply: "(체험 모드) " + R[Math.min(users.length-1, R.length-1)] });
+  }, 700));
+}
+</script>
+</body>
+</html>
