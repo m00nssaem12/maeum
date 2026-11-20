@@ -90,6 +90,7 @@ h2{font-size:22px;margin:0 0 4px;letter-spacing:-.3px}
 @keyframes b{0%,60%,100%{transform:translateY(0);opacity:.5}30%{transform:translateY(-5px);opacity:1}}
 .chips{display:flex;gap:8px;flex-wrap:wrap;padding:4px 14px 6px;max-width:760px;width:100%;margin:0 auto}
 .chip{border:1px solid var(--line);background:var(--card);border-radius:999px;padding:6px 13px;font-size:14.5px;cursor:pointer;color:var(--sub)}
+.chip.tip{border-color:#ffd38a;background:#fff8e6;color:#9a6a00}
 .chip:hover{border-color:var(--main);color:var(--main-d)}
 .inputrow{display:flex;gap:8px;padding:8px 14px calc(14px + env(safe-area-inset-bottom));max-width:760px;width:100%;margin:0 auto}
 .inputrow textarea{flex:1;resize:none;border:2px solid var(--line);border-radius:16px;padding:11px 14px;background:var(--card);max-height:140px;outline:none}
@@ -210,6 +211,9 @@ details.tinfo summary{cursor:pointer}
 .ttable tr.bad td{background:#fff0ee}
 .mybox{background:#f7f3ff;border:2px solid #e3dafb;border-radius:16px;padding:14px 16px;margin:0 0 16px}
 .myitem .tf div{font-size:15.5px}
+.want-row{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin:10px 0 18px}
+.want{background:#fff;border:2px solid var(--line);border-radius:16px;padding:14px 8px;font-size:17px;font-weight:700;cursor:pointer}
+.want.sel{border-color:var(--main);background:var(--soft)}
 .care{background:#f3fbf7;border:2px solid #cdeedd;border-radius:16px;padding:14px;font-size:17px;margin-bottom:6px}
 #s-check .btn.big.ghost{margin-top:8px}
 
@@ -273,6 +277,13 @@ details.tinfo summary{cursor:pointer}
     <h2 class="mt">그 마음은 얼마나 커?</h2>
     <div class="thermo"><span>조금</span><input type="range" id="temp" min="1" max="10" value="5"><span>아주 많이</span></div>
     <div class="temp-val">🌡️ <b id="tempVal">5</b> / 10</div>
+    <div id="wantRow">
+      <h2 class="mt">오늘 마음이에게 바라는 건? <span class="sub" style="font-weight:400;font-size:15px">(골라도, 안 골라도 돼요)</span></h2>
+      <div class="want-row">
+        <button class="want" data-want="listen">🫶 그냥 들어 줘</button>
+        <button class="want" data-want="solve">💡 같이 방법 찾아 줘</button>
+      </div>
+    </div>
     <div id="wWho" class="hidden">
       <label class="lbl">내 번호 <span class="sub" style="font-weight:400">(쓰지 않아도 돼요)</span><input id="weatherWho" maxlength="20" placeholder="예: 7번"></label>
       <p class="sub" style="margin-top:-4px">번호를 쓰면 선생님이 나중에 내 마음을 살펴볼 수 있어요.</p>
@@ -542,13 +553,14 @@ const DANGER = ["죽고싶","죽고십","죽을래","죽어버릴","죽어버리
 const $ = id => document.getElementById(id);
 const esc = s => String(s).replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
 const isDanger = t => { const s = t.replace(/\s/g,""); return DANGER.concat(CONFIG.EXTRA_DANGER_WORDS || []).some(k => k && s.includes(String(k).replace(/\s/g,""))); };
+const plain = t => String(t || "").replace(/\*+/g, "").replace(/^[ \t]*#{1,6}[ \t]*/gm, "").replace(/`+/g, "");
 const emoIcon = n => (EMOS.find(e => e[1] === n) || ["",""])[0];
 const emoText = list => (list || []).map(e => emoIcon(e) + " " + e).join(", ");
 const hhmm = t => { const d = new Date(t); return String(d.getHours()).padStart(2,"0") + ":" + String(d.getMinutes()).padStart(2,"0"); };
 const baseUrl = () => location.href.split(/[?#]/)[0];
 
 let S, accessCode = "";
-const freshState = () => ({ emotions: [], temp: 5, messages: [], busy: false, cleared: false, tnotes: {}, myId: null, mode: "talk" });
+const freshState = () => ({ emotions: [], temp: 5, messages: [], busy: false, cleared: false, tnotes: {}, myId: null, mode: "talk", want: "" });
 S = freshState();
 
 function show(id){ document.querySelectorAll(".screen").forEach(s => s.classList.toggle("on", s.id === id)); window.scrollTo(0,0); }
@@ -604,6 +616,7 @@ function setCheckMode(mode){
   const w = mode === "weather";
   $("chkTitle").textContent = w ? "☀️ 오늘 내 마음 날씨는?" : "지금 내 마음과 가장 가까운 감정은?";
   $("wWho").classList.toggle("hidden", !w);
+  $("wantRow").classList.toggle("hidden", w);
   $("btnBegin").textContent = w ? "선생님께 보내기" : "마음이랑 이야기 시작하기";
 }
 $("btnStart").onclick = () => { $("startErr").textContent = ""; if (!readAccessCode()) return; setCheckMode("talk"); renderEmo(); show("s-check"); };
@@ -627,6 +640,10 @@ function renderEmo(){
   });
   $("btnBegin").disabled = S.emotions.length === 0;
 }
+document.querySelectorAll(".want").forEach(b => b.onclick = () => {
+  S.want = S.want === b.dataset.want ? "" : b.dataset.want;
+  document.querySelectorAll(".want").forEach(x => x.classList.toggle("sel", x.dataset.want === S.want));
+});
 $("temp").oninput = e => { S.temp = +e.target.value; $("tempVal").textContent = S.temp; };
 function startChat(){
   $("chatEmo").textContent = S.emotions.map(emoIcon).join("") + " 🌡️" + S.temp;
@@ -789,10 +806,10 @@ async function requestReply(){
   setBusy(true); typing(true);
   try {
     setChips(null);
-    const r = await callAPI({ mode: "chat", checkin: { emotions: S.emotions, temp: S.temp }, messages: S.messages });
+    const r = await callAPI({ mode: "chat", checkin: { emotions: S.emotions, temp: S.temp, want: S.want }, messages: S.messages });
     if (r.safety) { typing(false); handleSafety(); }
     else {
-      const t = (r.reply || "").trim() || "이야기해 줘서 고마워. 조금 더 말해 줄래?";
+      const t = plain(r.reply).trim() || "이야기해 줘서 고마워. 조금 더 말해 줄래?";
       S.messages.push({ role: "assistant", content: t });
       await speak(t);
       setChips(r.choices || []);
@@ -849,12 +866,12 @@ async function speak(t){
   }
 }
 // 답장 고르기 버튼 (AI가 대화에 맞게 만든 것 + '잘 모르겠어')
-const DEFAULT_CHIPS = ["잘 모르겠어", "말하기 좀 어려워", "조금 더 생각해 볼게"];
+const DEFAULT_CHIPS = ["잘 모르겠어", "말하기 좀 어려워", "💡 어떻게 하면 좋을까?"];
 function setChips(list){
   const box = $("chips"); box.innerHTML = "";
   if (!list) return;
-  const items = list.length ? [...list, "잘 모르겠어"].filter((v, i, a) => a.indexOf(v) === i).slice(0, 4) : DEFAULT_CHIPS;
-  items.forEach(t => { const b = document.createElement("button"); b.className = "chip"; b.textContent = t; b.onclick = () => send(t); box.appendChild(b); });
+  const items = list.length ? [...list.slice(0, 3), "💡 어떻게 하면 좋을까?", "잘 모르겠어"].filter((v, i, a) => a.indexOf(v) === i) : DEFAULT_CHIPS;
+  items.forEach(t => { const b = document.createElement("button"); b.className = "chip" + (t.startsWith("💡") ? " tip" : ""); b.textContent = t; b.onclick = () => send(t.replace(/^💡\s*/, "")); box.appendChild(b); });
 }
 
 /* ---------- 위기 안내 ---------- */
@@ -883,7 +900,7 @@ $("btnToSum").onclick = async () => {
   if (S.busy || !canSummarize()) return;
   setBusy(true); loading(true, "마음이가 오늘 이야기를 정리하고 있어요…");
   try {
-    const r = await callAPI({ mode: "summary", checkin: { emotions: S.emotions, temp: S.temp }, messages: S.messages, cleared: S.cleared });
+    const r = await callAPI({ mode: "summary", checkin: { emotions: S.emotions, temp: S.temp, want: S.want }, messages: S.messages, cleared: S.cleared });
     loading(false); setBusy(false);
     if (r.safety) { handleSafety(); return; }
     renderSummary(r.summary || {});
@@ -899,12 +916,12 @@ function renderSummary(sum){
     const f = document.createElement("div"); f.className = "field";
     f.innerHTML = `<label for="f_${k}">${label}</label><textarea id="f_${k}" placeholder="${ph} (비워 둬도 괜찮아요)"></textarea>`;
     box.appendChild(f);
-    const ta = f.querySelector("textarea"); ta.value = (sum[k] || "").trim();
+    const ta = f.querySelector("textarea"); ta.value = plain(sum[k]).trim();
     const grow = () => { ta.style.height = "auto"; ta.style.height = ta.scrollHeight + "px"; };
     ta.addEventListener("input", grow); requestAnimationFrame(grow);
   });
   S.tnotes = {};
-  TFIELDS.forEach(([k]) => { const v = (sum[k] || "").trim(); if (v) S.tnotes[k] = v; });
+  TFIELDS.forEach(([k]) => { const v = plain(sum[k]).trim(); if (v) S.tnotes[k] = v; });
   const tb = $("tnoteFields");
   tb.innerHTML = TFIELDS.filter(([k]) => S.tnotes[k]).map(([k, label]) => `<div class="tro"><b>${label}</b><div>${esc(S.tnotes[k])}</div></div>`).join("")
     || `<p class="sub" style="margin:0">정리할 내용이 없어요.</p>`;
@@ -993,6 +1010,7 @@ function resetAll(){
   $("sendBox").classList.add("hidden");
   $("temp").value = 5; $("tempVal").textContent = 5; $("weatherWho").value = "";
   $("btnToSum").disabled = true; setCheckMode("talk"); myLock();
+  document.querySelectorAll(".want").forEach(x => x.classList.remove("sel"));
   show("s-start");
 }
 function backToStart(msg){ resetAll(); $("startErr").textContent = msg; }
