@@ -103,6 +103,16 @@ h2{font-size:22px;margin:0 0 4px;letter-spacing:-.3px}
 .field textarea{width:100%;border:0;border-radius:10px;background:#fffaf6;padding:10px 12px;resize:none;outline:none;min-height:52px}
 .field textarea:focus{background:#fff3ec}
 .field textarea::placeholder{color:#c6b8ae}
+.tnote-box{background:#f5f7ff;border:1px solid #dfe4fb;border-radius:16px;padding:12px 14px;margin-bottom:12px}
+.tnote-head{font-weight:800}
+.tnote-box .field{background:#fff;border-color:#e6e9fb;margin-bottom:8px;padding:10px 12px}
+.tnote-box .field label{font-size:15px}
+.tnote-box .tro{background:#fff;border:1px solid #e6e9fb;border-radius:12px;padding:8px 12px;margin-bottom:8px}
+.tnote-box .tro b{display:block;font-size:14px;color:var(--sub)}
+.tnote-box .tro div{white-space:pre-wrap}
+.tdiff{background:#fff6d9;border:1px solid #f1d98a;border-radius:10px;padding:6px 10px;margin-top:8px;font-size:14.5px}
+.tsec{background:#f5f7ff;border:1px solid #dfe4fb;border-radius:12px;padding:8px 12px;margin-top:10px}
+.tsec>b{display:block;margin-bottom:2px}
 .check{display:flex;gap:8px;align-items:center;margin:8px 2px 16px;color:var(--sub);cursor:pointer}
 .row{display:flex;gap:10px}
 .row .btn{flex:1}
@@ -168,6 +178,7 @@ h2{font-size:22px;margin:0 0 4px;letter-spacing:-.3px}
   .p-field{margin-bottom:10px;break-inside:avoid}
   .p-field h3,.p-memo h3,.p-log h3{font-size:12pt;margin:0 0 3px;padding-left:7px;border-left:4px solid #888}
   .p-field p{margin:0;padding:6px 10px;border:1px solid #ddd;border-radius:6px;white-space:pre-wrap;font-size:11.5pt}
+  .p-sec{font-size:13pt;margin:14px 0 8px;padding-top:8px;border-top:1.5px dashed #999}
   .p-log{margin-top:12px}
   .p-log p{margin:2px 0;white-space:pre-wrap;font-size:10.5pt}
   .p-memo{margin-top:14px;break-inside:avoid}
@@ -238,6 +249,12 @@ h2{font-size:22px;margin:0 0 4px;letter-spacing:-.3px}
     <p class="sub">마음이가 오늘 이야기를 정리했어요. 내 마음과 다른 부분은 직접 고치고, 선생님께 보여 주기 싫은 칸은 지워도 괜찮아요. 빈 칸은 보내거나 인쇄하지 않아요.</p>
     <div class="sum-emo" id="sumEmo"></div>
     <div id="sumFields"></div>
+    <div class="tnote-box">
+      <div class="tnote-head">🧑‍🏫 선생님께 함께 가는 참고 내용</div>
+      <p class="sub" style="margin:2px 0 10px">선생님이 내 이야기를 잘 이해하도록 마음이가 정리한 내용이에요. 이 부분은 고칠 수 없어요.</p>
+      <div id="tnoteFields"></div>
+      <label class="check" style="margin:8px 2px 0"><input type="checkbox" id="tnoteDiff"> 이 중에 내가 한 말과 다른 부분이 있어요 (선생님께 함께 알려요)</label>
+    </div>
     <label class="check"><input type="checkbox" id="incLog"> 대화 내용 전체도 함께 보내기 / 인쇄하기</label>
     <div id="sendBox" class="sendbox hidden">
       <div class="sendhead">📨 선생님께 바로 보내기</div>
@@ -350,6 +367,14 @@ const FIELDS = [
   ["tried","내가 해 볼 수 있는 것","나에게 도움이 되는 것"],
   ["to_teacher","선생님께 하고 싶은 말","선생님께 꼭 전하고 싶은 말"],
 ];
+const TFIELDS = [
+  ["situation","상황 정리"],
+  ["people","관련된 사람"],
+  ["emotion_flow","감정의 흐름"],
+  ["needs","학생이 바라는 도움"],
+  ["strengths","학생이 가진 힘"],
+  ["check_points","상담 때 확인해 볼 점"],
+];
 const DANGER = ["죽고싶","죽고십","죽을래","죽어버릴","죽어버리고","죽고말","자살","자해","사라지고싶","없어지고싶","살기싫","살고싶지않","태어나지말걸","태어나지않았으면","뛰어내리","목매","손목긋","손목을긋","학대","성추행","성폭력"];
 
 const $ = id => document.getElementById(id);
@@ -361,7 +386,7 @@ const hhmm = t => { const d = new Date(t); return String(d.getHours()).padStart(
 const baseUrl = () => location.href.split(/[?#]/)[0];
 
 let S, accessCode = "";
-const freshState = () => ({ emotions: [], temp: 5, messages: [], busy: false, cleared: false });
+const freshState = () => ({ emotions: [], temp: 5, messages: [], busy: false, cleared: false, tnotes: {} });
 S = freshState();
 
 function show(id){ document.querySelectorAll(".screen").forEach(s => s.classList.toggle("on", s.id === id)); window.scrollTo(0,0); }
@@ -577,13 +602,20 @@ function renderSummary(sum){
     const grow = () => { ta.style.height = "auto"; ta.style.height = ta.scrollHeight + "px"; };
     ta.addEventListener("input", grow); requestAnimationFrame(grow);
   });
+  S.tnotes = {};
+  TFIELDS.forEach(([k]) => { const v = (sum[k] || "").trim(); if (v) S.tnotes[k] = v; });
+  const tb = $("tnoteFields");
+  tb.innerHTML = TFIELDS.filter(([k]) => S.tnotes[k]).map(([k, label]) => `<div class="tro"><b>${label}</b><div>${esc(S.tnotes[k])}</div></div>`).join("")
+    || `<p class="sub" style="margin:0">정리할 내용이 없어요.</p>`;
+  $("tnoteDiff").checked = false;
   $("incLog").checked = false;
   show("s-sum");
   if (RELAY_ON) { $("sendBox").classList.remove("hidden"); checkTeacherOnline(); }
 }
 function readFields(){ const o = {}; FIELDS.forEach(([k]) => { const el = $("f_" + k); const v = el ? el.value.trim() : ""; if (v) o[k] = v; }); return o; }
+function readTNotes(){ return { ...(S.tnotes || {}) }; }
 $("btnBack").onclick = () => { show("s-chat"); scrollLog(); };
-$("btnPrint").onclick = () => { printDoc({ title: "마음 정리 노트", emotions: S.emotions, temp: S.temp, fields: readFields(), log: $("incLog").checked ? S.messages : null, memo: true }); };
+$("btnPrint").onclick = () => { printDoc({ title: "마음 정리 노트", emotions: S.emotions, temp: S.temp, fields: readFields(), tnotes: readTNotes(), tdiff: $("tnoteDiff").checked, log: $("incLog").checked ? S.messages : null, memo: true }); };
 $("btnDone").onclick = async () => { if (await ask("오늘 이야기를 모두 지울까요? 지우면 다시 볼 수 없어요.")) resetAll(); };
 $("btnReset1").onclick = async () => { if (await ask("처음으로 돌아갈까요? 지금까지의 대화는 지워져요.")) resetAll(); };
 
@@ -621,7 +653,7 @@ $("btnSendNote").onclick = async () => {
   if (!(await ask("정리 노트를 선생님께 보낼까요?"))) return;
   $("btnSendNote").disabled = true;
   try {
-    const ok = await sendToTeacher({ type: "note", who, emotions: S.emotions, temp: S.temp, fields, log: $("incLog").checked ? S.messages : null });
+    const ok = await sendToTeacher({ type: "note", who, emotions: S.emotions, temp: S.temp, fields, tnotes: readTNotes(), tdiff: $("tnoteDiff").checked, log: $("incLog").checked ? S.messages : null });
     if (ok) { $("sendState").textContent = `✓ ${hhmm(Date.now())}에 선생님께 보냈어요! 고친 뒤 다시 보낼 수도 있어요.`; toast("선생님께 보냈어요."); }
     else { $("sendState").textContent = "그 사이 선생님 화면이 닫혔어요. 인쇄해서 드리거나 다시 확인해 줘."; $("sendForm").classList.add("hidden"); $("btnRecheck").classList.remove("hidden"); }
   } catch (e) { toast("보내지 못했어요. 다시 눌러 볼래요?" + (e.info ? " (" + e.info + ")" : "")); }
@@ -629,11 +661,17 @@ $("btnSendNote").onclick = async () => {
 };
 
 /* ---------- 인쇄 ---------- */
-function printDoc({ title, emotions, temp, fields, log, who, memo }){
+function printDoc({ title, emotions, temp, fields, tnotes, tdiff, log, who, memo }){
   const d = new Date(), date = `${d.getFullYear()}. ${d.getMonth()+1}. ${d.getDate()}.`;
   let h = `<div class="p-head"><h1>${title}</h1><div class="p-meta"><span>날짜: ${date}</span><span>이름: ${who ? esc(who) : "________________"}</span></div></div>`;
   h += `<div class="p-emo"><b>고른 감정</b> ${esc(emoText(emotions)) || "-"} <b style="margin-left:14px">마음의 크기</b> ${temp}/10 <span class="p-bar"><i style="width:${temp*10}%"></i></span></div>`;
   if (fields) FIELDS.forEach(([k, label]) => { const v = (fields[k] || "").trim(); if (v) h += `<div class="p-field"><h3>${label}</h3><p>${esc(v)}</p></div>`; });
+  if (tnotes && Object.keys(tnotes).length) {
+    h += `<div class="p-tnotes"><h2 class="p-sec">선생님 참고 (AI가 학생 말을 바탕으로 정리, 학생이 보고 보냄)</h2>`;
+    if (tdiff) h += `<p style="font-size:11pt;margin:0 0 8px">※ 학생이 "이 중에 내가 한 말과 다른 부분이 있다"고 표시했어요.</p>`;
+    TFIELDS.forEach(([k, label]) => { if (tnotes[k]) h += `<div class="p-field"><h3>${label}</h3><p>${esc(tnotes[k])}</p></div>`; });
+    h += `</div>`;
+  }
   if (log && log.length) h += `<div class="p-log"><h3>대화 내용</h3>` + log.map(m => `<p><b>${m.role === "user" ? "나" : "마음이"}:</b> ${esc(m.content)}</p>`).join("") + `</div>`;
   h += `<div class="p-memo"><h3>선생님 메모</h3><div class="lines"></div></div>`;
   h += `<div class="p-foot">학생이 AI 도우미 '마음이'와 대화한 뒤 확인한 내용입니다. AI의 정리는 참고 자료이며 진단이 아닙니다. · made by m00n</div>`;
@@ -644,7 +682,7 @@ window.addEventListener("afterprint", () => { $("print").innerHTML = ""; });
 
 function resetAll(){
   S = freshState();
-  $("log").innerHTML = ""; $("sumFields").innerHTML = ""; $("print").innerHTML = ""; $("chips").innerHTML = "";
+  $("log").innerHTML = ""; $("sumFields").innerHTML = ""; $("tnoteFields").innerHTML = ""; $("print").innerHTML = ""; $("chips").innerHTML = "";
   $("inp").value = ""; autoGrow(); $("sendWho").value = "";
   $("sendBox").classList.add("hidden");
   $("temp").value = 5; $("tempVal").textContent = 5;
@@ -719,10 +757,17 @@ function addNote(n, at){
     const fields = n.fields || {};
     let h = `<div class="thead"><span class="who">${esc(n.who || "이름 없음")}</span><span class="meta">${hhmm(at)} · ${esc(emoText(n.emotions))} · 🌡️ ${n.temp}/10</span></div>`;
     FIELDS.forEach(([k, label]) => { if (fields[k]) h += `<div class="tf"><b>${label}</b><div>${esc(fields[k])}</div></div>`; });
+    const tn = n.tnotes || {};
+    if (Object.keys(tn).length) {
+      h += `<div class="tsec"><b>🧑‍🏫 상담 참고 <span class="sub" style="font-weight:400;font-size:13px">(AI 정리 · 학생이 보고 보냄)</span></b>`;
+      TFIELDS.forEach(([k, label]) => { if (tn[k]) h += `<div class="tf"><b>${label}</b><div>${esc(tn[k])}</div></div>`; });
+      if (n.tdiff) h += `<div class="tdiff">⚠️ 학생이 "이 중에 내가 한 말과 다른 부분이 있다"고 표시했어요. 상담 때 함께 확인해 주세요.</div>`;
+      h += `</div>`;
+    }
     if (n.log && n.log.length) h += `<details><summary>대화 전체 보기 (${n.log.length}개)</summary>` + n.log.map(m => `<div class="tf"><b>${m.role === "user" ? "학생" : "마음이"}</b><div>${esc(m.content)}</div></div>`).join("") + `</details>`;
     h += `<div class="tbtns"><button class="btn sm ghost" data-a="del">지우기</button><button class="btn sm" data-a="print">🖨️ 인쇄</button></div>`;
     c.innerHTML = h;
-    c.querySelector('[data-a="print"]').onclick = () => printDoc({ title: "마음 정리 노트", emotions: n.emotions, temp: n.temp, fields, log: n.log, who: n.who, memo: true });
+    c.querySelector('[data-a="print"]').onclick = () => printDoc({ title: "마음 정리 노트", emotions: n.emotions, temp: n.temp, fields, tnotes: tn, tdiff: n.tdiff, log: n.log, who: n.who, memo: true });
     c.querySelector('[data-a="del"]').onclick = async () => { if (await ask("이 노트를 지울까요? 지우면 다시 볼 수 없어요.")) removeNote(c); };
     beep();
   }
