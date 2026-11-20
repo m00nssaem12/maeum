@@ -51,7 +51,8 @@ h2{font-size:22px;margin:0 0 4px;letter-spacing:-.3px}
 .demo{background:#fff4c7;border:1px solid #f3dc7a;border-radius:12px;padding:10px 14px;font-size:14.5px;margin:0 auto 16px;max-width:520px;text-align:left}
 .promise{list-style:none;padding:18px 20px;margin:0 auto;max-width:520px;background:var(--card);border-radius:18px;border:1px solid var(--line);text-align:left}
 .promise li{display:flex;gap:10px;padding:6px 0}
-.promise li span{flex:none;width:28px;text-align:center}
+.promise li>span:first-child{flex:none;width:28px;text-align:center}
+.promise li>span+span{flex:1;width:auto}
 .coderow{margin:12px 0 0}
 .coderow input{margin-left:8px;padding:8px 12px;border-radius:10px;border:2px solid var(--line);width:160px;text-align:center}
 
