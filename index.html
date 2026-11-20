@@ -148,6 +148,7 @@ h2{font-size:22px;margin:0 0 4px;letter-spacing:-.3px}
 .tstatus{font-size:14px;padding:4px 10px;border-radius:999px;background:#eee;white-space:nowrap}
 .tstatus.on{background:#e3f6ee;color:#2a8a66}
 .tstatus.off{background:#fde8e5;color:#c4473a}
+.vault{margin-top:12px;padding-top:12px;border-top:1px dashed var(--line)}
 .tempty{text-align:center;color:var(--sub);padding:40px 10px;border:2px dashed var(--line);border-radius:16px}
 .tcard{background:#fff;border:1px solid var(--line);border-radius:16px;padding:14px 16px;margin-bottom:12px;animation:pop .3s}
 .tcard.alert{background:#fff0ee;border:2px solid #f3b4aa}
@@ -287,9 +288,13 @@ h2{font-size:22px;margin:0 0 4px;letter-spacing:-.3px}
       <p class="sub">
         · 이 화면이 열려 있을 때만 학생이 보낼 수 있어요.<br>
         · 노트는 이 화면만 열 수 있게 암호화되어 전달되고, 이 화면이 받는 즉시 서버에서 지워져요.<br>
-        · 받은 노트는 이 화면에만 있어요. 창을 닫거나 새로고침하면 모두 사라지니, 필요한 노트는 인쇄해 두세요.<br>
-        · 학생 화면에 위기 안내가 뜨면 이름 없이 🚨 알림이 와요.
+        · 학생 화면에 위기 안내가 뜨면 이름 없이 🚨 알림이 와요. (알림은 보관하지 않아요)
       </p>
+      <div class="vault">
+        <label class="check" style="margin:0"><input type="checkbox" id="vaultOn" checked> <b>이 기기에 보관하기</b></label>
+        <p class="sub" id="vaultInfo" style="margin:4px 0 8px"></p>
+        <button class="btn sm ghost" id="btnVaultClear">보관함 모두 지우기</button>
+      </div>
     </div>
     <div id="tEmpty" class="tempty">아직 받은 노트가 없어요.<br>학생이 '선생님께 바로 보내기'를 누르면 여기에 바로 나타나요.</div>
     <div id="tList"></div>
@@ -309,7 +314,7 @@ h2{font-size:22px;margin:0 0 4px;letter-spacing:-.3px}
 <!-- 선생님 화면 열기 -->
 <div id="tLogin" class="overlay hidden"><div class="card">
   <h2>🧑‍🏫 선생님 화면</h2>
-  <p class="sub" id="tLoginSub">우리 반 확인 번호를 넣어 주세요. 처음이라면 새로 정하면 돼요. 같은 번호를 넣으면 언제나 같은 우리 반 링크가 만들어져요.</p>
+  <p class="sub" id="tLoginSub">우리 반 확인 번호를 넣어 주세요. 처음이라면 새로 정하면 돼요. 같은 번호를 넣으면 언제나 같은 우리 반 링크와 이 기기의 보관함이 열려요.</p>
   <label class="lbl">확인 번호 (6자리 이상 추천)<input id="tPin" type="password" autocomplete="off"></label>
   <p id="tLoginErr" class="err"></p>
   <button class="btn ghost" id="tLoginCancel">취소</button>
@@ -353,6 +358,8 @@ const CONFIG = {
   USE_ACCESS_CODE: false,
   // 위기 안내 화면을 닫는 기본 확인 번호 (우리 반 링크 없이 들어왔을 때만 사용)
   TEACHER_PIN: "1234",
+  // 선생님 기기에 받은 노트를 보관하는 기간(일). 확인 번호로 암호화되어 이 기기 브라우저에만 저장됩니다.
+  TEACHER_KEEP_DAYS: 30,
   // '정리하기' 버튼이 켜지는 최소 학생 발화 수
   MIN_TURNS_FOR_SUMMARY: 3,
 };
@@ -691,6 +698,62 @@ function resetAll(){
 }
 function backToStart(msg){ resetAll(); $("startErr").textContent = msg; }
 
+/* ---------- 선생님 기기 보관함 (확인 번호로 암호화, 이 브라우저에만) ---------- */
+const V = { key: null, salt: null, notes: [] };   // notes: [{ id, at, n }]
+const vName = () => "maeum-vault-" + T.k;
+const vOffName = () => "maeum-vault-off-" + T.k;
+const lsGet = k => { try { return localStorage.getItem(k); } catch { return null; } };
+const lsSet = (k, v) => { try { localStorage.setItem(k, v); return true; } catch { return false; } };
+const lsDel = k => { try { localStorage.removeItem(k); } catch {} };
+async function vaultKey(pin, salt){
+  const base = await crypto.subtle.importKey("raw", TE.encode(pin), "PBKDF2", false, ["deriveKey"]);
+  return crypto.subtle.deriveKey({ name: "PBKDF2", salt, iterations: 200000, hash: "SHA-256" }, base, { name: "AES-GCM", length: 256 }, false, ["encrypt", "decrypt"]);
+}
+async function vaultOpen(pin){
+  V.notes = [];
+  const raw = lsGet(vName());
+  let saved = null; try { saved = raw ? JSON.parse(raw) : null; } catch {}
+  V.salt = saved && saved.salt ? unb64(saved.salt) : crypto.getRandomValues(new Uint8Array(16));
+  V.key = await vaultKey(pin, V.salt);
+  if (saved && saved.ct) {
+    try {
+      const pt = await crypto.subtle.decrypt({ name: "AES-GCM", iv: unb64(saved.iv) }, V.key, unb64(saved.ct));
+      V.notes = JSON.parse(TD.decode(pt)) || [];
+    } catch { V.notes = []; }
+  }
+  const limit = Date.now() - CONFIG.TEACHER_KEEP_DAYS * 86400000;
+  const before = V.notes.length;
+  V.notes = V.notes.filter(x => x.at >= limit);
+  if (V.notes.length !== before) await vaultSave();
+}
+async function vaultSave(){
+  if (!V.key || !$("vaultOn").checked) return;
+  if (!V.notes.length) { lsDel(vName()); updateVaultInfo(); return; }
+  const iv = crypto.getRandomValues(new Uint8Array(12));
+  const ct = await crypto.subtle.encrypt({ name: "AES-GCM", iv }, V.key, TE.encode(JSON.stringify(V.notes)));
+  if (!lsSet(vName(), JSON.stringify({ v: 1, salt: b64(V.salt), iv: b64(iv), ct: b64(ct) }))) toast("이 기기에 보관하지 못했어요. (저장 공간 부족 또는 브라우저 설정)");
+  updateVaultInfo();
+}
+function updateVaultInfo(){
+  $("vaultInfo").textContent = $("vaultOn").checked
+    ? `받은 노트를 확인 번호로 암호화해서 이 기기 브라우저에만 보관해요. 같은 번호로 다시 열면 보여요. ${CONFIG.TEACHER_KEEP_DAYS}일이 지나면 자동으로 지워져요. (지금 ${V.notes.length}개 보관 중) 여러 사람이 쓰는 컴퓨터라면 끄는 것을 추천해요.`
+    : "보관하지 않아요. 창을 닫거나 새로고침하면 받은 노트가 모두 사라져요. 필요한 노트는 인쇄해 두세요.";
+}
+$("vaultOn").onchange = async () => {
+  if (!$("vaultOn").checked) {
+    if (V.notes.length && !(await ask("보관을 끌까요? 이 기기에 보관된 노트가 지워져요. (지금 화면에 보이는 노트는 창을 닫기 전까지 남아 있어요)"))) { $("vaultOn").checked = true; return; }
+    lsDel(vName()); lsSet(vOffName(), "1");
+  } else { lsDel(vOffName()); await vaultSave(); }
+  updateVaultInfo();
+};
+$("btnVaultClear").onclick = async () => {
+  if (!(await ask("이 기기에 보관된 노트와 화면의 노트를 모두 지울까요? 되돌릴 수 없어요."))) return;
+  V.notes = []; lsDel(vName());
+  $("tList").innerHTML = ""; T.count = 0; $("tEmpty").classList.remove("hidden");
+  updateVaultInfo(); toast("보관함을 비웠어요.");
+};
+const whenText = at => { const d = new Date(at), now = new Date(); return d.toDateString() === now.toDateString() ? hhmm(at) : `${d.getMonth()+1}/${d.getDate()} ${hhmm(at)}`; };
+
 /* ---------- 선생님 화면 ---------- */
 const T = { t: null, k: null, keys: null, timer: null, busy: false, count: 0 };
 $("btnTeacher").onclick = () => {
@@ -707,10 +770,16 @@ $("tLoginOk").onclick = async () => {
   if (!window.crypto || !crypto.subtle) { $("tLoginErr").textContent = "이 브라우저에서는 쓸 수 없어요. https 주소로 열어 주세요."; return; }
   const k = await classKeyFromPin(pin);
   if (CLASS_KEY && k !== CLASS_KEY) { $("tLoginErr").textContent = "지금 링크를 만든 번호와 달라요. 새 반을 만들려면 ?k= 없는 기본 주소에서 열어 주세요."; return; }
-  $("tPin").value = ""; $("tLogin").classList.add("hidden");
+  $("tLoginOk").disabled = true; $("tLoginErr").textContent = "여는 중…";
+  $("tLogin").classList.add("hidden");
   T.t = await tokenFromPin(pin); T.k = k;
   $("tLink").value = baseUrl() + "?k=" + k;
   $("tList").innerHTML = ""; $("tEmpty").classList.remove("hidden"); T.count = 0;
+  $("vaultOn").checked = lsGet(vOffName()) !== "1";
+  await vaultOpen(pin);
+  V.notes.slice().sort((a, b) => a.at - b.at).forEach(x => renderNote(x.n, x.at, x.id));
+  updateVaultInfo();
+  $("tPin").value = ""; $("tLoginErr").textContent = ""; $("tLoginOk").disabled = false;
   show("s-teacher");
   if (!CONFIG.WORKER_URL) { setTStatus("체험 모드 — 받기 꺼짐", "off"); return; }
   T.keys = await crypto.subtle.generateKey(ECDH, false, ["deriveKey"]);   // 이 화면에서만 쓰는 열쇠 (창을 닫으면 사라짐)
@@ -731,7 +800,7 @@ async function tPoll(){
     const r = await callAPI({ action: "teacher_poll", t: T.t });
     if (r.error === "closed") await tOpen();
     else {
-      for (const it of r.items || []) { try { addNote(await openBox(it.box, T.keys.privateKey), it.at); } catch {} }
+      for (const it of r.items || []) { try { await addNote(await openBox(it.box, T.keys.privateKey), it.at); } catch {} }
       setTStatus("● 받는 중", "on");
     }
   } catch (e) { setTStatus("연결이 끊겼어요 — 다시 시도 중", "off"); }
@@ -742,7 +811,14 @@ function beep(){
     o.frequency.value = 880; g.gain.setValueAtTime(.15, a.currentTime); g.gain.exponentialRampToValueAtTime(.001, a.currentTime + .5);
     o.connect(g); g.connect(a.destination); o.start(); o.stop(a.currentTime + .5); } catch {}
 }
-function addNote(n, at){
+async function addNote(n, at){
+  if (n.type === "note") {
+    const id = Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
+    V.notes.push({ id, at, n }); await vaultSave();
+    renderNote(n, at, id); beep();
+  } else { renderNote(n, at, null); }
+}
+function renderNote(n, at, id){
   $("tEmpty").classList.add("hidden");
   const c = document.createElement("div");
   if (n.type === "alert") {
@@ -755,7 +831,7 @@ function addNote(n, at){
   } else {
     c.className = "tcard";
     const fields = n.fields || {};
-    let h = `<div class="thead"><span class="who">${esc(n.who || "이름 없음")}</span><span class="meta">${hhmm(at)} · ${esc(emoText(n.emotions))} · 🌡️ ${n.temp}/10</span></div>`;
+    let h = `<div class="thead"><span class="who">${esc(n.who || "이름 없음")}</span><span class="meta">${whenText(at)} · ${esc(emoText(n.emotions))} · 🌡️ ${n.temp}/10</span></div>`;
     FIELDS.forEach(([k, label]) => { if (fields[k]) h += `<div class="tf"><b>${label}</b><div>${esc(fields[k])}</div></div>`; });
     const tn = n.tnotes || {};
     if (Object.keys(tn).length) {
@@ -768,8 +844,10 @@ function addNote(n, at){
     h += `<div class="tbtns"><button class="btn sm ghost" data-a="del">지우기</button><button class="btn sm" data-a="print">🖨️ 인쇄</button></div>`;
     c.innerHTML = h;
     c.querySelector('[data-a="print"]').onclick = () => printDoc({ title: "마음 정리 노트", emotions: n.emotions, temp: n.temp, fields, tnotes: tn, tdiff: n.tdiff, log: n.log, who: n.who, memo: true });
-    c.querySelector('[data-a="del"]').onclick = async () => { if (await ask("이 노트를 지울까요? 지우면 다시 볼 수 없어요.")) removeNote(c); };
-    beep();
+    c.querySelector('[data-a="del"]').onclick = async () => {
+      if (!(await ask("이 노트를 지울까요? 이 기기 보관함에서도 지워져요."))) return;
+      V.notes = V.notes.filter(x => x.id !== id); await vaultSave(); removeNote(c);
+    };
   }
   $("tList").prepend(c); T.count++;
 }
@@ -780,13 +858,15 @@ $("btnTCopy").onclick = async () => {
   toast("링크를 복사했어요.");
 };
 $("btnTClose").onclick = async () => {
-  if (T.count > 0 && !(await ask("선생님 화면을 닫을까요? 받은 노트가 모두 사라져요."))) return;
+  const unsaved = T.count > 0 && !$("vaultOn").checked;
+  if (unsaved && !(await ask("선생님 화면을 닫을까요? 보관하지 않는 중이라 받은 노트가 모두 사라져요."))) return;
   clearInterval(T.timer); T.timer = null;
   if (CONFIG.WORKER_URL && T.t) callAPI({ action: "teacher_close", t: T.t }).catch(() => {});
   T.t = T.k = T.keys = null; T.count = 0; $("tList").innerHTML = "";
+  V.key = null; V.salt = null; V.notes = [];
   show("s-start");
 };
-window.addEventListener("beforeunload", e => { if (T.count > 0) { e.preventDefault(); e.returnValue = ""; } });
+window.addEventListener("beforeunload", e => { if (T.count > 0 && T.t && !$("vaultOn").checked) { e.preventDefault(); e.returnValue = ""; } });
 
 /* ---------- 서버 통신 ---------- */
 async function callAPI(payload){
