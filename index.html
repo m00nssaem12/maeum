@@ -223,12 +223,7 @@ h2{font-size:22px;margin:0 0 4px;letter-spacing:-.3px}
     </div>
   </header>
   <div id="log" class="log" aria-live="polite"></div>
-  <div class="chips" id="chips">
-    <button class="chip">잘 모르겠어</button>
-    <button class="chip">말하기 좀 어려워</button>
-    <button class="chip">조금 더 생각해 볼게</button>
-    <button class="chip">응, 맞아</button>
-  </div>
+  <div class="chips" id="chips"></div>
   <div class="inputrow">
     <textarea id="inp" rows="1" maxlength="500" placeholder="여기에 써 봐요"></textarea>
     <button class="btn" id="btnSend">보내기</button>
@@ -467,12 +462,14 @@ async function requestReply(){
   document.querySelectorAll(".errmsg").forEach(e => e.remove());
   setBusy(true); typing(true);
   try {
+    setChips(null);
     const r = await callAPI({ mode: "chat", checkin: { emotions: S.emotions, temp: S.temp }, messages: S.messages });
-    typing(false);
-    if (r.safety) handleSafety();
+    if (r.safety) { typing(false); handleSafety(); }
     else {
       const t = (r.reply || "").trim() || "이야기해 줘서 고마워. 조금 더 말해 줄래?";
-      S.messages.push({ role: "assistant", content: t }); addBubble("assistant", t);
+      S.messages.push({ role: "assistant", content: t });
+      await speak(t);
+      setChips(r.choices || []);
     }
   } catch (e) {
     typing(false);
@@ -494,7 +491,7 @@ function send(textArg){
   $("inp").value = ""; autoGrow();
   if (lastRole() === "user") S.messages[S.messages.length-1].content += "\n" + text;
   else S.messages.push({ role: "user", content: text });
-  addBubble("user", text);
+  addBubble("user", text); setChips(null);
   if (isDanger(text)) { handleSafety(); setBusy(false); return; }
   requestReply();
 }
@@ -507,7 +504,32 @@ $("inp").addEventListener("keydown", e => {
 });
 function autoGrow(){ const t = $("inp"); t.style.height = "auto"; t.style.height = Math.min(t.scrollHeight, 140) + "px"; }
 $("inp").addEventListener("input", autoGrow);
-document.querySelectorAll(".chip").forEach(c => c.onclick = () => send(c.textContent));
+// 마음이 말을 말풍선 여러 개로 나눠 사람처럼 보내기
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+function splitBubbles(t){
+  let parts = t.split(/\n+/).map(s => s.trim()).filter(Boolean);
+  if (parts.length === 1 && parts[0].length > 70) {          // 긴 한 덩어리는 문장 단위로 둘로
+    const ss = parts[0].match(/[^.!?…~]+[.!?…~]+[\s"')]*|.+$/g) || [parts[0]];
+    if (ss.length >= 2) { const half = Math.ceil(ss.length / 2); parts = [ss.slice(0, half).join("").trim(), ss.slice(half).join("").trim()]; }
+  }
+  while (parts.length > 3) parts.splice(parts.length - 2, 2, parts[parts.length - 2] + " " + parts[parts.length - 1]);
+  return parts;
+}
+async function speak(t){
+  const parts = splitBubbles(t);
+  for (let i = 0; i < parts.length; i++) {
+    if (i > 0) { typing(true); await sleep(Math.min(400 + parts[i].length * 25, 1500)); }
+    typing(false); addBubble("assistant", parts[i]);
+  }
+}
+// 답장 고르기 버튼 (AI가 대화에 맞게 만든 것 + '잘 모르겠어')
+const DEFAULT_CHIPS = ["잘 모르겠어", "말하기 좀 어려워", "조금 더 생각해 볼게"];
+function setChips(list){
+  const box = $("chips"); box.innerHTML = "";
+  if (!list) return;
+  const items = list.length ? [...list, "잘 모르겠어"].filter((v, i, a) => a.indexOf(v) === i).slice(0, 4) : DEFAULT_CHIPS;
+  items.forEach(t => { const b = document.createElement("button"); b.className = "chip"; b.textContent = t; b.onclick = () => send(t); box.appendChild(b); });
+}
 
 /* ---------- 위기 안내 ---------- */
 function handleSafety(){
@@ -622,7 +644,7 @@ window.addEventListener("afterprint", () => { $("print").innerHTML = ""; });
 
 function resetAll(){
   S = freshState();
-  $("log").innerHTML = ""; $("sumFields").innerHTML = ""; $("print").innerHTML = "";
+  $("log").innerHTML = ""; $("sumFields").innerHTML = ""; $("print").innerHTML = ""; $("chips").innerHTML = "";
   $("inp").value = ""; autoGrow(); $("sendWho").value = "";
   $("sendBox").classList.add("hidden");
   $("temp").value = 5; $("tempVal").textContent = 5;
@@ -750,7 +772,7 @@ function demoAPI(p){
       res({ summary: { feelings: `${p.checkin.emotions.join(", ")} 마음이었어요.`, event: users.map(u => u.content).join(" "), thoughts: "", wish: "", tried: "", to_teacher: "" } });
       return;
     }
-    if (!users.length) { res({ reply: `안녕, 나는 마음이야 🧡\n오늘 '${p.checkin.emotions.join("', '")}' 마음을 골랐구나. 무슨 일이 있었는지 이야기해 줄래?` }); return; }
+    if (!users.length) { res({ reply: `안녕, 나는 마음이야 🧡\n오늘 '${p.checkin.emotions.join("', '")}' 마음을 골랐구나. 무슨 일이 있었는지 이야기해 줄래?`, choices: ["친구 일이야", "집에서 있었던 일", "그냥 기분이 그래"] }); return; }
     const last = users[users.length-1].content, short = last.length > 24 ? last.slice(0,24) + "…" : last;
     const R = [
       `"${short}" 그런 일이 있었구나. 그때 어떤 생각이 들었어?`,
@@ -759,7 +781,7 @@ function demoAPI(p){
       "좋아. 선생님께 꼭 하고 싶은 말이 있다면 뭐야?",
       "오늘 이야기 정말 잘해 줬어. 이제 위의 '정리하기' 버튼을 눌러 정리해 볼까?",
     ];
-    res({ reply: "(체험 모드) " + R[Math.min(users.length-1, R.length-1)] });
+    res({ reply: "(체험 모드) " + R[Math.min(users.length-1, R.length-1)], choices: ["응 맞아", "그건 아니야"] });
   }, 700));
 }
 </script>
